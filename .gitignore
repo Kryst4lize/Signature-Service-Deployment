@@ -1,0 +1,36 @@
+*.jpg
+*.png
+*.pdf
+*.plan
+*.h5
+*.keras
+*.pth
+*.onnx
+*.trt
+*.bin
+*.pt
+
+# Python cache
+__pycache__
+
+# Virtual environment
+venv
+**/.env*
+**/*.v2
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints
+
+# Temporary files
+*.tmp
+*.log
+
+# PyInstaller
+*.spec
+build
+dist
+*.conf
+pip.conf
+
+# External repositories (clone separately)
+pytorch-CycleGAN-and-pix2pix/

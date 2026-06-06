@@ -1,0 +1,1 @@
+Data was derived from this https://www.kaggle.com/datasets/robinreni/signature-verification-dataset

@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SigVerify — Signature Verification</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080B11;--surface:#0F1318;--surface2:#161C24;
+  --border:#1E2535;--border2:#263041;
+  --accent:#3D7EF5;--accent-dim:#1A3A7A;
+  --green:#10D98A;--green-dim:#0A3D25;
+  --red:#F04040;--red-dim:#3D1010;
+  --yellow:#F5C842;--yellow-dim:#3D3010;
+  --text:#D8E0EE;--text2:#7B8BA8;--text3:#3E4D63;
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+  --radius:6px;
+}
+html{font-size:14px;background:var(--bg);color:var(--text);font-family:var(--sans)}
+body{min-height:100vh;display:flex;flex-direction:column}
+button{font-family:var(--mono);cursor:pointer;border:none;outline:none}
+input{font-family:var(--sans);outline:none}
+header{
+  padding:18px 32px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:16px;background:var(--surface);
+}
+.logo{font-family:var(--mono);font-weight:600;font-size:1.1rem;letter-spacing:.04em;color:#fff;display:flex;align-items:center;gap:10px}
+.logo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.logo-sub{font-size:.7rem;color:var(--text2);font-weight:400;margin-top:1px}
+.api-bar{margin-left:auto;display:flex;align-items:center;gap:8px}
+.api-bar input{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:var(--radius);font-family:var(--mono);font-size:.8rem;width:220px}
+.api-status{width:8px;height:8px;border-radius:50%;background:var(--text3);transition:background .3s}
+.api-status.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.api-status.err{background:var(--red);box-shadow:0 0 6px var(--red)}
+.tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);padding:0 32px}
+.tab{font-family:var(--mono);font-size:.8rem;font-weight:500;padding:14px 20px;color:var(--text2);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all .2s;letter-spacing:.05em;text-transform:uppercase}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.panels{flex:1;padding:28px 32px;overflow-y:auto}
+.panel{display:none}
+.panel.active{display:block}
+.section-title{font-family:var(--mono);font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;color:var(--text2);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+.drop-zone{border:1.5px dashed var(--border2);border-radius:var(--radius);padding:40px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:rgba(61,126,245,.04)}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.drop-icon{font-size:2rem;margin-bottom:10px;opacity:.4}
+.drop-label{font-size:.85rem;color:var(--text2)}
+.drop-label b{color:var(--accent)}
+.drop-hint{font-family:var(--mono);font-size:.7rem;color:var(--text3);margin-top:4px}
+.form-row{display:flex;gap:12px;margin-bottom:14px}
+.form-row:last-child{margin-bottom:0}
+.field{flex:1;display:flex;flex-direction:column;gap:6px}
+.field label{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;color:var(--text2)}
+.field input{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:9px 12px;border-radius:var(--radius);font-size:.9rem;transition:border-color .2s}
+.field input:focus{border-color:var(--accent)}
+.img-preview{margin-top:14px;display:none}
+.img-preview img{max-height:160px;border-radius:var(--radius);border:1px solid var(--border2);display:block}
+.preview-name{font-family:var(--mono);font-size:.7rem;color:var(--text2);margin-top:6px}
+.btn{font-family:var(--mono);font-size:.8rem;letter-spacing:.06em;padding:10px 22px;border-radius:var(--radius);border:1px solid transparent;transition:all .2s;font-weight:500}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{filter:brightness(1.15)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.btn-ghost{background:transparent;color:var(--text2);border-color:var(--border2)}
+.btn-ghost:hover{color:var(--text);border-color:var(--accent)}
+.btn-danger{background:transparent;color:var(--red);border-color:var(--red-dim)}
+.btn-danger:hover{background:var(--red-dim)}
+.btn-sm{padding:5px 12px;font-size:.72rem}
+.spinner{width:16px;height:16px;border:2px solid var(--accent-dim);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+#toast{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast-item{background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);padding:10px 16px;font-family:var(--mono);font-size:.78rem;animation:slideIn .25s ease;pointer-events:auto;display:flex;align-items:center;gap:8px}
+.toast-item.ok{border-color:var(--green);color:var(--green)}
+.toast-item.err{border-color:var(--red);color:var(--red)}
+.toast-item.info{border-color:var(--accent);color:var(--accent)}
+@keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.sig-table{width:100%;border-collapse:collapse;font-size:.82rem}
+.sig-table th{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text3);padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+.sig-table td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:middle}
+.sig-table tr:hover td{background:var(--surface2)}
+.sig-table .id-cell{font-family:var(--mono);font-size:.75rem;color:var(--text3)}
+.sig-table .name-cell{color:var(--text);font-weight:500}
+.sig-table .date-cell{font-family:var(--mono);font-size:.72rem}
+.badge{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;padding:2px 8px;border-radius:3px}
+.badge-green{background:var(--green-dim);color:var(--green)}
+.badge-red{background:var(--red-dim);color:var(--red)}
+.badge-yellow{background:var(--yellow-dim);color:var(--yellow)}
+.badge-blue{background:var(--accent-dim);color:var(--accent)}
+.empty{text-align:center;padding:48px;color:var(--text3);font-family:var(--mono);font-size:.8rem}
+.verify-scroll{display:flex;flex-direction:column;gap:24px;margin-top:20px}
+.page-result{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.page-result-header{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.page-num{font-family:var(--mono);font-size:.72rem;color:var(--text2)}
+.page-result-body{padding:20px}
+.images-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px}
+.img-card{display:flex;flex-direction:column;gap:8px}
+.img-card-label{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)}
+.img-card img{width:100%;border-radius:var(--radius);border:1px solid var(--border2);display:block;background:var(--surface2)}
+.img-card.annotated img{border-color:rgba(240,64,64,.5);box-shadow:0 0 0 1px rgba(240,64,64,.2)}
+.match-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 16px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)}
+.match-row.matched-yes{border-color:rgba(16,217,138,.25);background:rgba(16,217,138,.04)}
+.match-row.matched-no{border-color:rgba(240,64,64,.25);background:rgba(240,64,64,.04)}
+.match-label{font-family:var(--mono);font-size:.68rem;color:var(--text3)}
+.match-value{font-family:var(--mono);font-size:.82rem;color:var(--text)}
+.match-user{font-size:.95rem;color:#fff;font-weight:600}
+.dist-bars{display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px}
+.dist-bar-row{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.7rem}
+.dist-bar-track{flex:1;height:4px;background:var(--border2);border-radius:2px;overflow:hidden}
+.dist-bar-fill{height:100%;border-radius:2px;transition:width .6s ease}
+.dist-bar-fill.resnet{background:var(--accent)}
+.dist-bar-fill.vgg{background:var(--yellow)}
+.loading-overlay{display:none;position:fixed;inset:0;background:rgba(8,11,17,.7);backdrop-filter:blur(2px);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.loading-overlay.show{display:flex}
+.loading-text{font-family:var(--mono);font-size:.82rem;color:var(--text2);animation:pulse 1.4s ease infinite}
+@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    <div>SigVerify<div class="logo-sub">Signature Verification System</div></div>
+  </div>
+  <div class="api-bar">
+    <span style="font-family:var(--mono);font-size:.7rem;color:var(--text3)">API</span>
+    <input type="text" id="apiBase" value="http://10.207.178.239:8080" placeholder="http://localhost:8080"/>
+    <div class="api-status" id="apiStatus" title="API health"></div>
+  </div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" data-tab="register">Register</button>
+  <button class="tab" data-tab="list">Signatures</button>
+  <button class="tab" data-tab="verify">Verify Document</button>
+</div>
+
+<div class="panels">
+
+  <!-- ══ TAB 1: REGISTER ══ -->
+  <div class="panel active" id="tab-register">
+    <div style="max-width:540px">
+      <div class="section-title">Register Signature</div>
+      <div class="card">
+        <div class="form-row">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" id="reg-username" placeholder="e.g. nguyen_van_a"/>
+          </div>
+        </div>
+        <div class="drop-zone" id="reg-drop">
+          <input type="file" id="reg-file" accept="image/*"/>
+          <div class="drop-icon">🖋</div>
+          <div class="drop-label">Drop signature image or <b>click to browse</b></div>
+          <div class="drop-hint">JPG · PNG · WEBP</div>
+        </div>
+        <div class="img-preview" id="reg-preview">
+          <img id="reg-preview-img" src="" alt="preview"/>
+          <div class="preview-name" id="reg-preview-name"></div>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:10px;align-items:center">
+          <button class="btn btn-primary" id="reg-submit" disabled>Register</button>
+          <button class="btn btn-ghost" id="reg-reset">Clear</button>
+          <span id="reg-spinner" style="display:none"><span class="spinner"></span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB 2: LIST ══ -->
+  <div class="panel" id="tab-list">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <div class="section-title" style="margin-bottom:0;flex:1">Registered Signatures</div>
+      <button class="btn btn-ghost btn-sm" id="list-refresh">↺ Refresh</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="sig-table">
+        <thead>
+          <tr><th>ID</th><th>Username</th><th>Registered</th><th>Modified</th><th></th></tr>
+        </thead>
+        <tbody id="sig-tbody">
+          <tr><td colspan="5" class="empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="list-meta" style="font-family:var(--mono);font-size:.7rem;color:var(--text3);margin-top:10px"></div>
+  </div>
+
+  <!-- ══ TAB 3: VERIFY ══ -->
+  <div class="panel" id="tab-verify">
+    <div style="max-width:680px;margin-bottom:28px">
+      <div class="section-title">Verify Document</div>
+      <div class="card">
+        <div class="drop-zone" id="ver-drop">
+          <input type="file" id="ver-file" accept="image/*,.pdf"/>
+          <div class="drop-icon">📄</div>
+          <div class="drop-label">Drop document or <b>click to browse</b></div>
+          <div class="drop-hint">PDF · JPG · PNG</div>
+        </div>
+        <div class="img-preview" id="ver-preview">
+          <div class="preview-name" id="ver-preview-name"></div>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:10px;align-items:center">
+          <button class="btn btn-primary" id="ver-submit" disabled>Run Verification</button>
+          <button class="btn btn-ghost" id="ver-reset">Clear</button>
+          <span id="ver-spinner" style="display:none"><span class="spinner"></span></span>
+        </div>
+      </div>
+    </div>
+    <div id="verify-results"></div>
+  </div>
+
+</div>
+
+<div class="loading-overlay" id="overlay">
+  <span class="spinner" style="width:28px;height:28px;border-width:3px"></span>
+  <span class="loading-text" id="overlay-text">Processing pipeline…</span>
+</div>
+<div id="toast"></div>
+
+<script>
+const $  = id => document.getElementById(id);
+const API = () => $('apiBase').value.replace(/\/$/, '');
+
+function toast(msg, type='info', dur=3500){
+  const t = document.createElement('div');
+  t.className = `toast-item ${type}`;
+  t.textContent = msg;
+  $('toast').appendChild(t);
+  setTimeout(() => t.remove(), dur);
+}
+function overlay(show, text='Processing…'){
+  $('overlay').classList.toggle('show', show);
+  $('overlay-text').textContent = text;
+}
+function fmtDate(str){
+  if(!str) return '—';
+  const d = new Date(str);
+  return d.toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'})
+       + ' ' + d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'});
+}
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function distColor(v){
+  if(v < 0.3) return 'var(--green)';
+  if(v < 0.5) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+// ── API health ────────────────────────────────────────────────────────────────
+async function checkHealth(){
+  try{
+    const r = await fetch(API()+'/health', {signal: AbortSignal.timeout(3000)});
+    $('apiStatus').className = 'api-status ' + (r.ok ? 'ok' : 'err');
+  } catch { $('apiStatus').className = 'api-status err'; }
+}
+$('apiBase').addEventListener('change', checkHealth);
+checkHealth();
+setInterval(checkHealth, 10000);
+
+// ── tabs ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $('tab-'+btn.dataset.tab).classList.add('active');
+    if(btn.dataset.tab === 'list') loadSignatures();
+  });
+});
+
+// ── drop zone ─────────────────────────────────────────────────────────────────
+function setupDrop(dropId, fileId, onFile){
+  const zone = $(dropId), inp = $(fileId);
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag');
+    if(e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]);
+  });
+  inp.addEventListener('change', () => { if(inp.files[0]) onFile(inp.files[0]); });
+}
+
+// ══ REGISTER ══════════════════════════════════════════════════════════════════
+let regFile = null;
+setupDrop('reg-drop','reg-file', f => {
+  regFile = f;
+  $('reg-preview-img').src = URL.createObjectURL(f);
+  $('reg-preview-name').textContent = f.name + '  (' + (f.size/1024).toFixed(1) + ' KB)';
+  $('reg-preview').style.display = 'block';
+  updateRegBtn();
+});
+$('reg-username').addEventListener('input', updateRegBtn);
+function updateRegBtn(){ $('reg-submit').disabled = !(regFile && $('reg-username').value.trim()); }
+
+$('reg-reset').addEventListener('click', () => {
+  regFile = null; $('reg-file').value = '';
+  $('reg-preview').style.display = 'none';
+  $('reg-username').value = '';
+  updateRegBtn();
+});
+
+$('reg-submit').addEventListener('click', async () => {
+  const username = $('reg-username').value.trim();
+  if(!username || !regFile) return;
+  $('reg-submit').disabled = true;
+  $('reg-spinner').style.display = 'inline';
+  overlay(true, 'CycleGAN denoising → ResNet50 + VGG16 extraction…');
+  const fd = new FormData();
+  fd.append('username', username); fd.append('file', regFile);
+  try{
+    const r = await fetch(API()+'/register-signature', {method:'POST', body:fd});
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || r.statusText);
+    toast('✓ Registered "' + data.username + '"  id=' + data.id, 'ok');
+    $('reg-reset').click();
+  } catch(e){ toast('Error: '+e.message, 'err', 5000); }
+  finally{
+    overlay(false); $('reg-spinner').style.display = 'none'; updateRegBtn();
+  }
+});
+
+// ══ LIST ══════════════════════════════════════════════════════════════════════
+async function loadSignatures(){
+  $('sig-tbody').innerHTML = '<tr><td colspan="5" class="empty"><span class="spinner"></span></td></tr>';
+  try{
+    const r = await fetch(API()+'/signatures?limit=100');
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || r.statusText);
+    $('list-meta').textContent = data.total + ' signature(s) total';
+    if(!data.items.length){
+      $('sig-tbody').innerHTML = '<tr><td colspan="5" class="empty">No signatures registered yet</td></tr>';
+      return;
+    }
+    $('sig-tbody').innerHTML = data.items.map(it => `
+      <tr>
+        <td class="id-cell">#${it.id}</td>
+        <td class="name-cell">${escHtml(it.username)}</td>
+        <td class="date-cell">${fmtDate(it.user_created_date)}</td>
+        <td class="date-cell">${fmtDate(it.user_modified_date)}</td>
+        <td style="text-align:right">
+          <button class="btn btn-danger btn-sm" onclick="deleteSig(${it.id},'${escHtml(it.username)}')">✕</button>
+        </td>
+      </tr>`).join('');
+  } catch(e){
+    $('sig-tbody').innerHTML = `<tr><td colspan="5" class="empty" style="color:var(--red)">Failed: ${e.message}</td></tr>`;
+  }
+}
+async function deleteSig(id, name){
+  if(!confirm('Delete signature for "'+name+'"?')) return;
+  try{
+    const r = await fetch(API()+'/signatures/'+id, {method:'DELETE'});
+    if(!r.ok && r.status !== 204) throw new Error(r.statusText);
+    toast('Deleted #'+id+' ('+name+')', 'ok');
+    loadSignatures();
+  } catch(e){ toast('Delete failed: '+e.message, 'err'); }
+}
+$('list-refresh').addEventListener('click', loadSignatures);
+
+// ══ VERIFY ════════════════════════════════════════════════════════════════════
+let verFile = null;
+setupDrop('ver-drop','ver-file', f => {
+  verFile = f;
+  $('ver-preview-name').textContent = '📎 ' + f.name + '  (' + (f.size/1024).toFixed(1) + ' KB)';
+  $('ver-preview').style.display = 'block';
+  $('ver-submit').disabled = false;
+});
+$('ver-reset').addEventListener('click', () => {
+  verFile = null; $('ver-file').value = '';
+  $('ver-preview').style.display = 'none';
+  $('ver-submit').disabled = true;
+  $('verify-results').innerHTML = '';
+});
+
+$('ver-submit').addEventListener('click', async () => {
+  if(!verFile) return;
+  $('ver-submit').disabled = true;
+  $('ver-spinner').style.display = 'inline';
+  overlay(true, 'YOLOv8 detect → CycleGAN clean → ResNet50+VGG16 extract → pgvector search…');
+  $('verify-results').innerHTML = '';
+  const fd = new FormData();
+  fd.append('file', verFile);
+  try{
+    const r = await fetch(API()+'/verify-document', {method:'POST', body:fd});
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail || r.statusText);
+    renderResults(data);
+  } catch(e){
+    $('verify-results').innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:.8rem;padding:16px">Error: ${e.message}</div>`;
+    toast('Verification failed: '+e.message, 'err', 5000);
+  } finally{
+    overlay(false); $('ver-spinner').style.display = 'none'; $('ver-submit').disabled = false;
+  }
+});
+
+function renderResults(data){
+  const container = $('verify-results');
+  const matched = data.results.filter(r => r.status==='matched' && r.matched).length;
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <div class="section-title" style="margin-bottom:0;flex:1">Results — ${data.total_pages} page(s)</div>
+      <span class="badge ${matched>0?'badge-green':'badge-yellow'}">${matched} verified match(es)</span>
+    </div>
+    <div class="verify-scroll" id="ver-scroll"></div>`;
+
+  const scroll = document.getElementById('ver-scroll');
+
+  data.results.forEach(res => {
+    const isVerified = res.status === 'matched' && res.matched;
+    const isLow     = res.status === 'matched' && !res.matched;
+
+    const badgeCls  = isVerified ? 'badge-green' : isLow ? 'badge-yellow' : 'badge-red';
+    const badgeTxt  = isVerified ? 'MATCHED' : isLow ? 'LOW CONFIDENCE'
+      : res.status === 'no_signature' ? 'NO SIGNATURE'
+      : res.status === 'no_match_in_db' ? 'NOT IN DB' : res.status.toUpperCase();
+
+    // ── three images ─────────────────────────────────────────────────────────
+    let imagesHtml = '';
+    if(res.page_annotated || res.crop_before || res.crop_after){
+      imagesHtml = `
+        <div class="images-row">
+          <div class="img-card annotated">
+            <div class="img-card-label">📄 Page · detected region</div>
+            <img src="data:image/png;base64,${res.page_annotated||''}" alt="annotated"/>
+          </div>
+          <div class="img-card">
+            <div class="img-card-label">✂ Crop · before CycleGAN</div>
+            <img src="data:image/png;base64,${res.crop_before||''}" alt="before"/>
+          </div>
+          <div class="img-card">
+            <div class="img-card-label">✨ Crop · after CycleGAN</div>
+            <img src="data:image/png;base64,${res.crop_after||''}" alt="after"/>
+          </div>
+        </div>`;
+    }
+
+    // ── match result row ──────────────────────────────────────────────────────
+    let matchHtml = '';
+    if(res.status === 'matched'){
+      const avg  = res.avg_distance ?? 0;
+      const rDst = res.resnet_distance ?? 0;
+      const vDst = res.vgg_distance ?? 0;
+      const rW   = Math.min(100, rDst * 100).toFixed(1);
+      const vW   = Math.min(100, vDst * 100).toFixed(1);
+
+      matchHtml = `
+        <div class="match-row ${isVerified?'matched-yes':'matched-no'}">
+          <div>
+            <div class="match-label">Identified as</div>
+            <div class="match-value match-user">${escHtml(res.username||'—')}</div>
+          </div>
+          <div>
+            <div class="match-label">Avg distance</div>
+            <div class="match-value" style="color:${distColor(avg)}">${avg.toFixed(4)}</div>
+          </div>
+          <div class="dist-bars">
+            <div class="dist-bar-row">
+              <span style="width:52px;color:var(--accent)">ResNet50</span>
+              <div class="dist-bar-track"><div class="dist-bar-fill resnet" style="width:${rW}%"></div></div>
+              <span style="color:var(--accent)">${rDst.toFixed(4)}</span>
+            </div>
+            <div class="dist-bar-row">
+              <span style="width:52px;color:var(--yellow)">VGG16</span>
+              <div class="dist-bar-track"><div class="dist-bar-fill vgg" style="width:${vW}%"></div></div>
+              <span style="color:var(--yellow)">${vDst.toFixed(4)}</span>
+            </div>
+          </div>
+          <span class="badge ${isVerified?'badge-green':'badge-yellow'}" style="margin-left:auto">
+            ${isVerified?'✓ VERIFIED':'⚠ UNCERTAIN'}
+          </span>
+        </div>`;
+    } else {
+      matchHtml = `
+        <div class="match-row matched-no">
+          <span style="font-family:var(--mono);font-size:.78rem;color:var(--text2)">
+            ${res.status==='no_signature' ? '⊘ No signature region detected on this page.'
+              : res.status==='no_match_in_db' ? '⊘ Signature detected but no match found in the database.'
+              : '⊘ ' + (res.detail||res.status)}
+          </span>
+        </div>`;
+    }
+
+    const el = document.createElement('div');
+    el.className = 'page-result';
+    el.innerHTML = `
+      <div class="page-result-header">
+        <span class="page-num">PAGE ${res.page}</span>
+        <span class="badge ${badgeCls}">${badgeTxt}</span>
+        ${res.bbox ? `<span style="font-family:var(--mono);font-size:.68rem;color:var(--text3);margin-left:auto">bbox [${res.bbox.map(v=>Math.round(v)).join(', ')}]</span>` : ''}
+      </div>
+      <div class="page-result-body">
+        ${imagesHtml}
+        ${matchHtml}
+      </div>`;
+    scroll.appendChild(el);
+  });
+}
+</script>
+</body>
+</html>

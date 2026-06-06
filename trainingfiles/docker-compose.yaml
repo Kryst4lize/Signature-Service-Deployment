@@ -1,0 +1,19 @@
+services:
+  signature-minh:
+    image: training-service-base:0.0.1
+    container_name: signature-minh
+    restart: unless-stopped
+    volumes:
+      - .:/workspace/train        # mount folder training của bạn vào container
+    working_dir: /workspace/train       # set thư mục làm việc
+    command: tail -f /dev/null
+    tty: true
+    
+    shm_size: '8gb'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

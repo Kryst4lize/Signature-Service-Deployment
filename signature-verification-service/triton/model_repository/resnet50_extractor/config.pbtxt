@@ -1,0 +1,28 @@
+name: "resnet50_extractor"
+backend: "onnxruntime"
+max_batch_size: 1
+
+input {
+  name: "input_layer_1"
+  data_type: TYPE_FP32
+  dims: [ 3, 224, 224 ]
+}
+
+output {
+  name: "fc1"
+  data_type: TYPE_FP32
+  dims: [ 4096 ]
+}
+
+dynamic_batching {
+  preferred_batch_size: [ 1 ]
+  max_queue_delay_microseconds: 100
+}
+
+instance_group [
+  {
+    kind: KIND_GPU
+    gpus: [ 0 ]
+    count: 1
+  }
+]

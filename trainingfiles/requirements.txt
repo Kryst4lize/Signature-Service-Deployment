@@ -1,0 +1,23 @@
+wandb==0.26.1
+tensorflow==2.21.0
+torch==2.3.0
+torchvision==0.18.0
+numpy==2.2.6
+matplotlib==3.10.9
+pillow==12.2.0
+triton==2.3.0
+visdom==0.2.4
+dominate==2.9.1
+tqdm==4.67.3
+python-dotenv==1.2.2
+scikit-learn==1.7.2
+protobuf==7.34.1
+setuptools==69.5.1
+scipy==1.15.3
+opencv-python==4.13.0.92
+onnxslim==0.1.92
+tensorboard
+
+onnx
+tf2onnx
+# tensorrt-cu12==10.16.1.11
