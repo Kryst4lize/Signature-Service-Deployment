@@ -4,11 +4,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import select, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
-from app.models.db import Item
-from app.services.image_utils import draw_bbox_on_tensor, tensor_to_b64
-from app.services.preprocessing import load_image_as_tensor
-from app.services.triton import TritonService, get_triton_service
+from app.db import Item, get_db
+from app.images import draw_bbox_on_tensor, load_image_as_tensor, tensor_to_b64
+from app.triton import TritonService, get_triton_service
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

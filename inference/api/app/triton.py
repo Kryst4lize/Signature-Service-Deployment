@@ -6,7 +6,7 @@ import numpy as np
 import tritonclient.http.aio as httpclient
 from PIL import Image as PILImage
 
-from app.core.config import settings
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
