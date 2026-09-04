@@ -11,12 +11,7 @@ input {
 output {
   name: "output"
   data_type: TYPE_FP32
-  dims: [3,224,224]
-}
-
-dynamic_batching {
-  preferred_batch_size: [ 1 ]
-  max_queue_delay_microseconds: 100
+  dims: [ 3, 224, 224 ]
 }
 
 instance_group [

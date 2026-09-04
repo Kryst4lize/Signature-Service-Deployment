@@ -1,140 +1,87 @@
-#!/usr/bin/env python3
-"""
-export_cyclegan_onnx.py
-=======================
-Script to export CycleGAN generator checkpoints (.pth) to ONNX.
+"""CycleGAN generator checkpoint (.pth) -> ONNX.
 
-This script imports the ResNet-9-blocks generator architecture from the cloned
-pytorch-CycleGAN-and-pix2pix repository.
+The architecture comes from the cloned upstream repo's `define_G`, not from a
+local reimplementation. That is deliberate. The two converters this repo used to
+carry both defined their own ResNet generator, and both got the state_dict key
+layout wrong: upstream wraps the network in an `nn.Sequential` stored as
+`self.model`, so every key is `model.N....`, and upstream's ResnetBlock stores
+its layers under `conv_block` where the local copies used `block`.
 
-Usage
------
-    # Export a single generator (default: G_B, the denoiser)
-    python export_cyclegan_onnx.py \
-        --checkpoint ../convert_model/original_model/latest_net_G_B.pth \
-        --output     ../convert_model/original_model/latest_net_G_B.onnx
-
-Requirements
-------------
-    - pytorch-CycleGAN-and-pix2pix must be cloned in the parent directory.
-    - pip install torch>=2.0
+`load_state_dict(..., strict=False)` then reported 48 missing and 48 unexpected
+keys — and returned a randomly initialised generator, which exports cleanly and
+produces garbage. Calling upstream's own factory removes that entire class of
+failure.
 """
 
 from __future__ import annotations
 
-import argparse
-import os
+import logging
 import sys
 from pathlib import Path
 
-import torch
+logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Import Architecture from CycleGAN Repo
-# ─────────────────────────────────────────────────────────────────────────────
 
-# Add the cloned repo to sys.path so we can import from it
-repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pytorch-CycleGAN-and-pix2pix"))
-if not os.path.exists(repo_path):
-    print(f"❌ Error: Could not find the pytorch-CycleGAN-and-pix2pix repository at {repo_path}", file=sys.stderr)
-    print("Please clone it first: git clone https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix.git", file=sys.stderr)
-    sys.exit(1)
+def export(
+    checkpoint: str | Path,
+    onnx_path: str | Path,
+    repo_path: str | Path,
+    image_size: int = 224,
+    opset: int = 14,
+    device: str = "cpu",
+) -> Path:
+    import torch
 
-sys.path.insert(0, repo_path)
+    checkpoint, onnx_path, repo_path = Path(checkpoint), Path(onnx_path), Path(repo_path)
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
+    if not (repo_path / "models" / "networks.py").is_file():
+        raise FileNotFoundError(
+            f"CycleGAN repo not found at {repo_path}. Run `sigtrain setup`."
+        )
 
-try:
+    sys.path.insert(0, str(repo_path))
     from models.networks import define_G
-except ImportError as e:
-    print(f"❌ Error importing define_G from CycleGAN repo: {e}", file=sys.stderr)
-    sys.exit(1)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Export logic
-# ─────────────────────────────────────────────────────────────────────────────
-
-def export_cyclegan_to_onnx(checkpoint_path: str, output_path: str,
-                             image_size: int = 224, device: str = "cpu") -> None:
-    print(f"Loading weights from {checkpoint_path} ...")
-
-    # 1. Build the generator blueprint using the repo's function
     net = define_G(
-        input_nc=3,
-        output_nc=3,
-        ngf=64,
-        netG='resnet_9blocks',
-        norm='instance',
-        use_dropout=False,
-        init_type='normal',
-        init_gain=0.02
+        input_nc=3, output_nc=3, ngf=64,
+        netG="resnet_9blocks", norm="instance",
+        use_dropout=False, init_type="normal", init_gain=0.02,
+        gpu_ids=[],
     )
 
-    # 2. Load the raw state dict
-    map_location = torch.device(device)
-    state_dict = torch.load(checkpoint_path, map_location=map_location)
+    # weights_only=True refuses to unpickle arbitrary objects; a generator
+    # checkpoint is a plain tensor dict, so nothing legitimate needs the
+    # unrestricted loader.
+    state = torch.load(checkpoint, map_location=torch.device(device), weights_only=True)
+    if hasattr(state, "_metadata"):
+        del state._metadata
+    # Checkpoints saved under DataParallel carry a "module." prefix.
+    state = {k.replace("module.", "", 1): v for k, v in state.items()}
 
-    # 3. Clean up multi-GPU "module." prefixes
-    if hasattr(state_dict, "_metadata"):
-        del state_dict._metadata
-    clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
-
-    # 4. Load weights
-    net.load_state_dict(clean_state)
+    # strict=True on purpose: a silent partial load is exactly the bug that
+    # made the previous converters export an untrained network.
+    net.load_state_dict(state, strict=True)
     net.eval()
-    net.to(map_location)
 
-    # 5. Dummy input — locks input shape into the ONNX graph
-    dummy = torch.randn(1, 3, image_size, image_size, device=map_location)
+    onnx_path.parent.mkdir(parents=True, exist_ok=True)
+    dummy = torch.randn(1, 3, image_size, image_size)
 
-    # 6. Export
-    print(f"Exporting to {output_path} ...")
+    logger.info("Exporting %s -> %s", checkpoint.name, onnx_path.name)
     torch.onnx.export(
         net,
         dummy,
-        output_path,
+        str(onnx_path),
         export_params=True,
-        opset_version=14,
+        opset_version=opset,
         do_constant_folding=True,
         input_names=["input"],
         output_names=["output"],
-        dynamic_axes={
-            "input":  {0: "batch_size"},
-            "output": {0: "batch_size"},
-        },
+        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
     )
-    print(f"✅ Export complete → {output_path}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────────────────────
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Export CycleGAN generator .pth → .onnx (uses cloned CycleGAN repo)",
+    logger.info(
+        "Exported. Note the generator ends in Tanh, so its output is [-1, 1]; "
+        "the serving side rescales with (x+1)/2."
     )
-    p.add_argument("--checkpoint", required=True,
-                   help="Path to the .pth generator checkpoint")
-    p.add_argument("--output", required=True,
-                   help="Output .onnx file path")
-    p.add_argument("--image-size", type=int, default=224,
-                   help="Input image size (default: 224)")
-    p.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
-                   help="Device for export (default: cpu)")
-    return p.parse_args()
-
-
-if __name__ == "__main__":
-    args = parse_args()
-
-    ckpt = Path(args.checkpoint)
-    if not ckpt.exists():
-        print(f"❌ Checkpoint not found: {ckpt}", file=sys.stderr)
-        sys.exit(1)
-
-    export_cyclegan_to_onnx(
-        checkpoint_path=str(ckpt),
-        output_path=args.output,
-        image_size=args.image_size,
-        device=args.device,
-    )
+    return onnx_path
