@@ -1,66 +1,151 @@
 # Signature Verification System
 
-An end-to-end Machine Learning system for detecting, cleaning, and verifying handwritten signatures in scanned documents (PDFs and images). This repository contains both the **model training pipeline** and the **production deployment service**.
+Detect, clean and verify handwritten signatures in scanned documents.
 
-## 🌟 Key Features
+Given a PDF or image, the system locates the signature with YOLOv8, strips
+away stamps, form rules and printed text with a CycleGAN denoiser, embeds the
+result with fine-tuned ResNet50 and VGG16, and matches it against registered
+signatures using pgvector.
 
-- **Document Parsing:** Detect signatures directly from full PDF document pages or scanned images using YOLOv8.
-- **Signature Denoising:** Automatically removes background noise, red official stamps, printed lines, and overlapping text to extract a clean signature using CycleGAN.
-- **High-Accuracy Matching:** Extracts deep feature embeddings (using ResNet50 and VGG16) to compare a queried signature against registered genuine signatures.
-- **Scalable Serving:** Production-ready inference powered by NVIDIA Triton Inference Server.
-- **Vector Search:** Uses PostgreSQL with the `pgvector` extension for fast L2 nearest-neighbor matching.
-
-## 📂 Repository Structure & Setup
-
-The repository is logically split into two main environments:
-
-### 1. `trainingfiles/` (Model Training & Conversion)
-This folder contains the research and ML training environment. It includes scripts for dataset preparation, CycleGAN training, ResNet/VGG fine-tuning, and PyTorch/Keras to ONNX model conversion.
-
-> **⚠️ Important Requirement:** The CycleGAN architecture relies on a third-party repository that is **not** included in this git repository. To run any CycleGAN training or export scripts, you must manually clone it into the training folder:
-> ```bash
-> cd trainingfiles/
-> git clone https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix.git
-> ```
-
-### 2. `signature-verification-service/` (Production Service)
-The production microservice environment. It contains the FastAPI backend, Docker Compose setup, Triton Inference Server configurations, and pgvector database integration.
-
-## 🚀 Quick Start
-
-### 1. Training the Models
-If you want to train the models from scratch, evaluate them, or export existing PyTorch checkpoints to ONNX format:
-```bash
-cd trainingfiles/
-# Make sure you clone the CycleGAN repository as mentioned above!
-# Then follow the comprehensive guide in documentation/02-training-pipeline.md
+```
+document ──> yolov8s ──> latest_net_G_B ──> resnet50 + vgg16 ──> pgvector
+              detect         denoise            embed             match
 ```
 
-### 2. Deploying the Service
-To run the pre-configured FastAPI service and Triton Inference Server locally:
+---
+
+## Two halves
+
+The repository is split into two self-contained services with one interface
+between them.
+
+| | | |
+|---|---|---|
+| **[`training/`](training/)** | Produces models | Datasets, CycleGAN training, backbone fine-tuning, evaluation, ONNX export |
+| **[`inference/`](inference/)** | Serves models | FastAPI + Triton + PostgreSQL/pgvector + web UI |
+
+The interface is a Triton model repository:
+
 ```bash
-cd signature-verification-service/
-cp .env.example .env
-# Open .env and set your secure passwords for the database
-docker compose up -d
+cd training  && sigtrain export        # -> ../inference/triton/model_repository/
+cd ../inference && docker compose up -d
 ```
-*See the [Deployment Guide](documentation/03-service-deployment.md) for full instructions.*
 
-## 🔒 Security & Configuration
-All infrastructure components have been designed securely. Ensure you properly configure your local `.env` files based on the provided `.env.example` templates before spinning up the services. Never commit your `.env` files or hardcode passwords in the codebase.
+Nothing else crosses. Neither half imports the other.
 
-## 📚 Documentation Directory
+---
 
-Detailed documentation is available in the `documentation/` folder. Start here to understand the system in depth:
+## Quick start
 
-1. **[Architecture Overview](documentation/01-architecture-overview.md)** — High-level system design and ML pipeline stages.
-2. **[Training Pipeline — Setup & Run](documentation/02-training-pipeline.md)** — How to train and evaluate models.
-3. **[Service Deployment — Setup & Run](documentation/03-service-deployment.md)** — How to deploy the production FastAPI/Triton microservice.
-4. **[Model Conversion Guide](documentation/04-model-conversion.md)** — Converting `.pth`/`.keras` models to `.onnx` for deployment.
-5. **[API Reference](documentation/05-api-reference.md)** — REST API endpoints for the FastAPI backend.
-6. **[Database Schema](documentation/06-database-schema.md)** — PostgreSQL & pgvector schema designs.
-7. **[Triton Configuration](documentation/07-triton-config.md)** — Inference Server model repository setup.
-8. **[Models & Datasets](documentation/08-models-and-datasets.md)** — Inventory of datasets, pretrained weights, and model files.
+### Serve (models already exported)
 
-## 📄 License
-This project is licensed under the terms of the LICENSE file included in the root of the repository.
+```bash
+cd inference/
+cp .env.example .env          # POSTGRES_PASSWORD has no default — set one
+docker compose up -d --build
+curl -s localhost:8080/health
+```
+
+UI at <http://localhost:8110>. Full instructions:
+[`inference/README.md`](inference/README.md).
+
+### Train
+
+```bash
+cd training/
+docker compose up -d && docker compose exec training bash
+
+sigtrain setup      # clone the CycleGAN repo, check the data layout
+sigtrain all        # every stage, in order
+```
+
+Full instructions: [`training/README.md`](training/README.md).
+
+---
+
+## Documentation
+
+Setup and run instructions live next to the code, in the two READMEs above.
+[`documentation/`](documentation/) covers what spans both halves:
+
+| # | Document |
+|---|---|
+| 1 | [Architecture](documentation/01-architecture.md) — design, the four models, data flow, ports |
+| 2 | [Pipeline deep dive](documentation/02-pipeline-deep-dive.md) — why the ML is built this way; the preprocessing contract |
+| 3 | [API reference](documentation/03-api-reference.md) — endpoints, schemas, error codes |
+| 4 | [Database](documentation/04-database.md) — schema, vector search, scaling |
+| 5 | [Operations](documentation/05-operations.md) — upgrades, backup, monitoring, capacity |
+| 6 | [Troubleshooting](documentation/06-troubleshooting.md) — symptom → cause → fix |
+
+---
+
+## Things worth knowing before you deploy
+
+**There is no authentication.** Both upload endpoints are open and each costs
+GPU time. Put a gateway in front of it before exposing it —
+[Operations § Exposure](documentation/05-operations.md#exposure).
+
+**Preprocessing is a contract, and violating it fails silently.** Each of the
+four models expects a different pixel convention; send the wrong one and the
+model still returns a well-formed tensor, just computed on input it never saw
+in training. No error, no log line, just poor matching that looks like a
+threshold problem —
+[Pipeline deep dive](documentation/02-pipeline-deep-dive.md#the-preprocessing-contract).
+
+**Embeddings are only comparable within one preprocessing regime.** Changing
+preprocessing or retraining the extractors invalidates every stored vector.
+`TRUNCATE items` and re-enrol.
+
+**Model weights are not in git.** They are hundreds of MB of build output.
+`sigtrain export` regenerates them into the serving tree.
+
+---
+
+## External dependencies
+
+Neither is vendored:
+
+- [pytorch-CycleGAN-and-pix2pix](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix)
+  — cloned by `sigtrain setup` into `training/external/`.
+- [Kaggle signature-verification-dataset](https://www.kaggle.com/datasets/robinreni/signature-verification-dataset)
+  — see [`training/data/README.md`](training/data/README.md).
+
+---
+
+## Repository layout
+
+```
+.
+├── training/
+│   ├── src/signature_training/   the pipeline package (`sigtrain`)
+│   ├── configs/default.yaml      one config for every stage
+│   ├── assets/                   caption font
+│   ├── data/                     datasets (gitignored)
+│   ├── artifacts/                checkpoints, models, ONNX, plots (gitignored)
+│   └── tests/                    62 tests, no GPU required
+│
+├── inference/
+│   ├── api/app/                  main, config, db, images, triton, routes
+│   ├── triton/model_repository/  config.pbtxt per model
+│   ├── postgres/init.sql         schema
+│   ├── frontend/index.html       web UI
+│   ├── nginx/nginx.conf          SPA + /api proxy
+│   └── tests/                    33 tests against a real pgvector
+│
+└── documentation/
+```
+
+---
+
+## Tests
+
+```bash
+cd training  && make test               # ~1s, no GPU, no TF/torch
+cd inference && make test-integration   # spins up a throwaway pgvector
+```
+
+---
+
+## License
+
+See [LICENSE](LICENSE).
