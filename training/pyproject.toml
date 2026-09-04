@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signature-training"
+version = "2.0.0"
+description = "Training pipeline for the signature detection, denoising and verification system"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { file = "../LICENSE" }
+
+# Runtime dependencies live in requirements.txt, which is what the Docker image
+# installs. They are intentionally not duplicated here: the deep-learning stack
+# needs exact pins chosen against a specific CUDA base image, which is a
+# deployment concern rather than a library-compatibility range.
+dependencies = []
+
+[project.scripts]
+sigtrain = "signature_training.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.ttf"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]
