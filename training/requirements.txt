@@ -1,23 +1,59 @@
-wandb==0.26.1
+# Training environment.
+#
+# GPU note: torch here is the CUDA build, which pulls ~1.7 GB of nvidia-* wheels.
+# It is needed only for the CycleGAN training and the .pth -> ONNX export. If you
+# train CycleGAN elsewhere and only run the Keras stages, install the CPU wheel
+# instead and drop ~1.7 GB from the image:
+#     pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu
+
+# ── Deep learning ─────────────────────────────────────────────────────────────
 tensorflow==2.21.0
 torch==2.3.0
 torchvision==0.18.0
-numpy==2.2.6
-matplotlib==3.10.9
-pillow==12.2.0
-triton==2.3.0
+
+# ── CycleGAN (upstream repo imports these unconditionally) ────────────────────
+# util/visualizer.py has a module-level `import wandb`; util/html.py imports
+# dominate. They look unused because the repo is cloned, not vendored.
+wandb==0.26.1
 visdom==0.2.4
 dominate==2.9.1
-tqdm==4.67.3
-python-dotenv==1.2.2
-scikit-learn==1.7.2
-protobuf==7.34.1
-setuptools==69.5.1
-scipy==1.15.3
-opencv-python==4.13.0.92
-onnxslim==0.1.92
-tensorboard
 
-onnx
-tf2onnx
-# tensorrt-cu12==10.16.1.11
+# ── Detector export ───────────────────────────────────────────────────────────
+# Was missing entirely: the YOLO export step was documented but unimplemented,
+# and both old converters imported ultralytics without declaring it.
+ultralytics==8.3.49
+
+# ── ONNX ──────────────────────────────────────────────────────────────────────
+onnx==1.17.0
+tf2onnx==1.16.1
+# onnx-simplifier, imported as `onnxsim`. The previous file pinned `onnxslim`,
+# a different package that ships no `onnxsim` module, so the conversion script
+# died with ModuleNotFoundError on a clean install.
+onnxsim==0.4.36
+
+# ── Data & numerics ───────────────────────────────────────────────────────────
+numpy==1.26.4
+scipy==1.14.1
+scikit-learn==1.5.2
+pillow==11.0.0
+# headless: nothing here calls imshow/namedWindow/waitKey, and the GUI build
+# fails to import in a slim container for want of libGL.
+opencv-python-headless==4.10.0.84
+matplotlib==3.9.3
+tqdm==4.67.1
+PyYAML==6.0.2
+
+# ── Experiment tracking ───────────────────────────────────────────────────────
+tensorboard==2.18.0
+
+# Removed:
+#   triton==2.3.0   This is openai/triton, the GPU kernel DSL - unrelated to
+#                   tritonclient. torch already declares it, guarded by
+#                   `platform_system == "Linux" and platform_machine == "x86_64"
+#                   and python_version < "3.12"`. Pinning it unconditionally
+#                   made `pip install -r requirements.txt` fail outright on
+#                   macOS, aarch64 and Python 3.12+, because it publishes only
+#                   manylinux x86_64 wheels and no sdist.
+#   protobuf==7.34.1  Let tensorflow/onnx resolve a mutually compatible version.
+#   setuptools        Build-time only; declared in pyproject.toml.
+#   python-dotenv     Configuration is configs/*.yaml now.
