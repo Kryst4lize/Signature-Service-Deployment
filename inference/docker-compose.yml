@@ -1,31 +1,34 @@
 services:
 
-  # ── PostgreSQL + pgvector ──────────────────────────────────────────────────
+  # ── PostgreSQL + pgvector ───────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg17
     container_name: sig_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env - see .env.example}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Triton Inference Server ────────────────────────────────────────────────
+  # ── Triton Inference Server ─────────────────────────────────────────────────
+  # Place model weights at triton/model_repository/<model>/1/model.onnx before
+  # starting; Triton exits if a model directory has no version subdirectory.
+  # `training/` produces them: `sigtrain export --output ../inference/triton/model_repository`
   triton:
-    image: nvcr.io/nvidia/tritonserver:24.01-py3
+    image: ${TRITON_IMAGE:-nvcr.io/nvidia/tritonserver:24.01-py3}
     container_name: sig_triton
     restart: unless-stopped
-    command: tritonserver --model-repository=/models --strict-model-config=false --log-verbose=1
+    command: tritonserver --model-repository=/models --strict-model-config=false
     volumes:
       - ./triton/model_repository:/models:ro
     ports:
@@ -46,11 +49,14 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── FastAPI Service ────────────────────────────────────────────────────────
+  # ── FastAPI service ─────────────────────────────────────────────────────────
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
+      args:
+        API_BASE_IMAGE: ${API_BASE_IMAGE:-python:3.11-slim-bookworm}
+        USE_INTERNAL_APT: ${USE_INTERNAL_APT:-0}
     container_name: sig_api
     restart: unless-stopped
     environment:
@@ -61,8 +67,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TRITON_HOST: triton
       TRITON_HTTP_PORT: 8000
-      TRITON_GRPC_PORT: 8001
       APP_ENV: ${APP_ENV:-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      MATCH_THRESHOLD: ${MATCH_THRESHOLD:-0.30}
+      DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.5}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-20}
     ports:
       - "8080:8080"
     depends_on:
@@ -70,24 +80,21 @@ services:
         condition: service_healthy
       triton:
         condition: service_healthy
-    volumes:
-      - ./api/app:/app/app:ro
 
-  # ── Frontend (nginx) ───────────────────────────────────────────────────────
+  # ── Frontend (nginx) ────────────────────────────────────────────────────────
   frontend:
     image: nginx:alpine
     container_name: sig_frontend
     restart: unless-stopped
     ports:
-      - 8110:80
+      - "8110:80"
     volumes:
       - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
-      # NOTE: NOT :ro — nginx entrypoint needs to write to this file on startup
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - api
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/nginx-health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/nginx-health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
