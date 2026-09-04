@@ -1,4 +1,3 @@
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,15 +37,20 @@ class Settings(BaseSettings):
 
     # ── App ───────────────────────────────────────────────────────────────────
     app_env: str = "production"
-    # Comma-separated browser origins allowed to call this API.
-    cors_origins: list[str] = []
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_origins(cls, v: object) -> object:
-        if isinstance(v, str):
-            return [o.strip() for o in v.split(",") if o.strip()]
-        return v
+    # Comma-separated browser origins allowed to call this API.
+    #
+    # Deliberately typed `str`, not `list[str]`: pydantic-settings JSON-decodes
+    # complex-typed fields in EnvSettingsSource *before* any validator runs, so
+    # CORS_ORIGINS=http://localhost:8110 raises
+    #   SettingsError: error parsing value for field "cors_origins"
+    # at import time and crash-loops the container. Splitting in a property
+    # keeps the env contract a plain comma-separated string.
+    cors_origins: str = ""
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def database_url(self) -> str:
