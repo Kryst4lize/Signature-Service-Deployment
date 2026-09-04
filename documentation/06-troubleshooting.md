@@ -177,10 +177,12 @@ Triton Inference Server. It publishes only manylinux x86_64 wheels, so the
 install failed outright on macOS, aarch64 and Python 3.12+. torch declares it
 already, correctly guarded by platform markers.
 
-### `ModuleNotFoundError: No module named 'onnxsim'`
+### `ModuleNotFoundError: No module named 'onnxslim'`
 
-Fixed in v2.0.0. The requirements pinned `onnxslim`, a different package.
-Simplification is now optional and skipped with a warning if absent.
+Fixed in v2.0.0. The converter imported `onnxsim` while requirements pinned
+`onnxslim` — different projects. Resolved in favour of onnxslim (pure Python,
+wheels for every platform; onnxsim has no aarch64 wheel and needs cmake).
+Simplification is also now optional and skipped with a warning if absent.
 
 ### CUDA out of memory
 
