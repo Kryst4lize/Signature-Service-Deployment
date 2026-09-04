@@ -2,7 +2,7 @@
 
 Stages, in order:
 
-    fetch-data          download/extract the Kaggle dataset and clone CycleGAN
+    setup               clone the CycleGAN repo and validate the data layout
     data-cyclegan       build paired clean/noisy images for the denoiser
     data-verification   filter genuine-only person folders
     train-cyclegan      train the denoiser (wraps the upstream repo)

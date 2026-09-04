@@ -38,7 +38,18 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
     repo_dir = cfg.paths.resolve("triton_repository")
     onnx_dir.mkdir(parents=True, exist_ok=True)
 
+    known = {
+        DETECTOR_NAME, DENOISER_NAME,
+        *(f"{b}_extractor" for b in keras_onnx.INPUT_NAMES),
+    }
     wanted = set(only) if only else None
+    if wanted:
+        unknown = wanted - known
+        if unknown:
+            raise ValueError(
+                f"Unknown model name(s) {sorted(unknown)}. "
+                f"Valid names: {sorted(known)}"
+            )
 
     def selected(name: str) -> bool:
         return wanted is None or name in wanted
@@ -46,9 +57,16 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
     exported: dict[str, Path] = {}
 
     # ── extractors ────────────────────────────────────────────────────────────
-    for name, path in keras_onnx.convert_extractors(models_dir, onnx_dir, cfg).items():
-        if selected(name):
-            exported[name] = path
+    # Filter BEFORE converting. Filtering the results still loaded both .keras
+    # models into TensorFlow, traced them with tf2onnx and rewrote
+    # artifacts/onnx/, even for `--only latest_net_G_B`.
+    wanted_extractors = [
+        b for b in keras_onnx.INPUT_NAMES if selected(f"{b}_extractor")
+    ]
+    for name, path in keras_onnx.convert_extractors(
+        models_dir, onnx_dir, cfg, backbones=wanted_extractors
+    ).items():
+        exported[name] = path
 
     # ── denoiser ──────────────────────────────────────────────────────────────
     if selected(DENOISER_NAME):

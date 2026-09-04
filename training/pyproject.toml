@@ -8,7 +8,11 @@ version = "2.0.0"
 description = "Training pipeline for the signature detection, denoising and verification system"
 requires-python = ">=3.10"
 readme = "README.md"
-license = { file = "../LICENSE" }
+# No `license` key. `{ file = "../LICENSE" }` escapes the project root, and
+# setuptools' expand.read_files() refuses that with
+#   DistutilsOptionError: Cannot access '.../training/../LICENSE'
+# (setuptools 59 in the current image tolerates it; newer versions do not).
+# The repository LICENSE (Apache-2.0) governs; it is not duplicated here.
 
 # Runtime dependencies live in requirements.txt, which is what the Docker image
 # installs. They are intentionally not duplicated here: the deep-learning stack

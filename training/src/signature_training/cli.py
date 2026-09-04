@@ -155,21 +155,36 @@ def stage_all(cfg: Config, args) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # The global flags go on a parent parser that is attached to BOTH the root
+    # and every subparser, so `sigtrain --set k=v export` and
+    # `sigtrain export --set k=v` both work. With them on the root alone,
+    # argparse hands everything after the stage name to the subparser, which
+    # does not know `--set` and exits 2 with "unrecognized arguments" — and the
+    # post-stage order is the one every doc and example uses.
+    #
+    # The defaults are SUPPRESS so the subparser does not overwrite a value the
+    # root already captured; real defaults are applied after parsing.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--config", default=argparse.SUPPRESS,
+                        help=f"YAML config (default: {DEFAULT_CONFIG.name})")
+    common.add_argument("--set", dest="overrides", action="append",
+                        default=argparse.SUPPRESS,
+                        metavar="section.field=value",
+                        help="Override a config value; repeatable")
+    common.add_argument("-v", "--verbose", action="store_true",
+                        default=argparse.SUPPRESS)
+
     parser = argparse.ArgumentParser(
         prog="sigtrain",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[common],
     )
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG),
-                        help=f"YAML config (default: {DEFAULT_CONFIG.name})")
-    parser.add_argument("--set", dest="overrides", action="append", default=[],
-                        metavar="section.field=value",
-                        help="Override a config value; repeatable")
-    parser.add_argument("-v", "--verbose", action="store_true")
 
     sub = parser.add_subparsers(dest="stage", required=True)
     for name in STAGES:
-        sp = sub.add_parser(name, help=STAGES[name].__doc__ or name)
+        sp = sub.add_parser(name, parents=[common],
+                            help=STAGES[name].__doc__ or name)
         if name == "train-cyclegan":
             sp.add_argument("--resume-epoch", type=int, default=None,
                             help="Resume from this epoch (passes --continue_train)")
@@ -179,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--output", default=None,
                             help="Triton repository path (overrides the config)")
 
-    sp_all = sub.add_parser("all", help="run every stage in order")
+    sp_all = sub.add_parser("all", parents=[common], help="run every stage in order")
     sp_all.add_argument("--skip", nargs="+", default=[], choices=STAGE_ORDER,
                         help="Stages to skip")
     sp_all.add_argument("--resume-epoch", type=int, default=None)
@@ -191,6 +206,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # SUPPRESS defaults mean these may be absent entirely.
+    args.config = getattr(args, "config", str(DEFAULT_CONFIG))
+    args.overrides = getattr(args, "overrides", []) or []
+    args.verbose = getattr(args, "verbose", False)
+
     _log_setup(args.verbose)
 
     overrides = {}

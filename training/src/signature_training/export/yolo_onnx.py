@@ -54,7 +54,10 @@ def export(
             imgsz=image_size,
             opset=opset,
             simplify=simplify_graph,
-            dynamic=False,   # config.pbtxt declares a fixed 3x640x640 input
+            # Dynamic batch dim, for the same reason as the Keras export: with
+            # `max_batch_size: 1` Triton requires dim 0 to be dynamic. The
+            # spatial dims stay fixed at imgsz; only the batch axis varies.
+            dynamic=True,
             nms=False,       # the client picks the top box itself
         )
     )

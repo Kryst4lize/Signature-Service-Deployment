@@ -62,8 +62,8 @@ def build(cfg: Config) -> dict[str, int]:
     paths = collect_images(src)
     if not paths:
         raise FileNotFoundError(
-            f"No images under {src}. Run `sigtrain fetch-data` or set "
-            f"paths.raw_signatures."
+            f"No images under {src}. Run `sigtrain setup` for the expected "
+            f"layout, or set paths.raw_signatures in configs/default.yaml."
         )
     logger.info("Found %d source images under %s", len(paths), src)
 
@@ -170,17 +170,28 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
             continue
         dst_split.mkdir(parents=True, exist_ok=True)
 
-        copied = 0
+        copied = existing = 0
         for folder in sorted(p for p in src_split.iterdir() if p.is_dir()):
             if "forg" in folder.name.lower():
                 continue
             target = dst_split / folder.name
-            if not target.exists():
+            if target.exists():
+                existing += 1
+            else:
                 shutil.copytree(folder, target)
                 copied += 1
-        counts[split] = copied
-        logger.info("Copied %d genuine folder(s) for %s", copied, split)
+        # Count what is PRESENT, not what this run copied. Counting only copies
+        # made every re-run look like an empty dataset and abort the stage — so
+        # `sigtrain all` could never be resumed once the split existed.
+        counts[split] = copied + existing
+        logger.info(
+            "%s: %d genuine folder(s) (%d copied, %d already present)",
+            split, counts[split], copied, existing,
+        )
 
     if not any(counts.values()):
-        raise RuntimeError(f"No genuine person folders found under {src}")
+        raise RuntimeError(
+            f"No genuine person folders found under {src}. Expected "
+            f"{src}/train/<person>/ directories not ending in '_forg'."
+        )
     return counts

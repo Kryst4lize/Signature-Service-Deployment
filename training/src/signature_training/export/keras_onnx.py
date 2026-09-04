@@ -53,7 +53,15 @@ def convert(
     logger.info("Converting %s -> %s", keras_path.name, onnx_path.name)
     model = tf.keras.models.load_model(keras_path, compile=False)
 
-    spec = (tf.TensorSpec((1, image_size, image_size, 3), tf.float32, name=input_name),)
+    # Batch dimension must be None, not 1. Triton's ONNX Runtime backend
+    # validates shapes at load time: with `max_batch_size: 1` in config.pbtxt it
+    # treats dim 0 as the implicit batch dim and requires the model to declare
+    # it dynamic. A model exported with a literal 1 is rejected —
+    #   "model configuration specified max-batch 1 but the model does not
+    #    support batching"
+    # — so the extractors would fail to load even though every other field
+    # matched.
+    spec = (tf.TensorSpec((None, image_size, image_size, 3), tf.float32, name=input_name),)
     proto, _ = tf2onnx.convert.from_keras(
         model,
         input_signature=spec,
@@ -110,10 +118,13 @@ def _log_io(onnx_path: Path) -> None:
         logger.info("  output %s %s", tensor.name, dims)
 
 
-def convert_extractors(models_dir: Path, onnx_dir: Path, cfg) -> dict[str, Path]:
-    """Convert whichever of the two extractors exist in `models_dir`."""
+def convert_extractors(
+    models_dir: Path, onnx_dir: Path, cfg, backbones: list[str] | None = None
+) -> dict[str, Path]:
+    """Convert whichever of the requested extractors exist in `models_dir`."""
     produced = {}
-    for backbone, input_name in INPUT_NAMES.items():
+    for backbone in (backbones if backbones is not None else list(INPUT_NAMES)):
+        input_name = INPUT_NAMES[backbone]
         src = models_dir / f"{backbone}_extractor.keras"
         if not src.is_file():
             logger.info("Skipping %s - %s not found", backbone, src.name)

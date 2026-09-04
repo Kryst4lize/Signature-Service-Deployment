@@ -196,3 +196,49 @@ def test_cli_exposes_every_stage():
 
     assert set(STAGE_ORDER) <= set(STAGES)
     assert "setup" in STAGES
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["export", "--set", "export.instance_kind=KIND_CPU"],
+        ["--set", "export.instance_kind=KIND_CPU", "export"],
+        ["train-verification", "--set", "verification.batch_size=8"],
+        ["--set", "verification.batch_size=8", "train-verification"],
+        ["all", "--set", "verification.batch_size=8"],
+    ],
+)
+def test_global_flags_are_accepted_on_either_side_of_the_stage(argv):
+    """Regression: --set/--config/-v used to live only on the root parser, so
+    argparse rejected them after the stage name with "unrecognized arguments" —
+    and the post-stage order is the one every doc and example uses."""
+    from signature_training.cli import build_parser
+
+    args = build_parser().parse_args(argv)
+    assert args.overrides, f"--set was dropped for {argv}"
+
+
+def test_config_flag_works_on_either_side_of_the_stage(tmp_path):
+    from signature_training.cli import build_parser
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("verification:\n  batch_size: 4\n")
+    for argv in ([f"--config={cfg}", "export"], ["export", f"--config={cfg}"]):
+        assert build_parser().parse_args(argv).config == str(cfg)
+
+
+def test_verification_split_is_idempotent(cfg):
+    """Regression: counting only newly copied folders made every re-run look
+    like an empty dataset and abort, so `sigtrain all` could not be resumed."""
+    first = cyclegan.build_verification_split(cfg)
+    second = cyclegan.build_verification_split(cfg)
+    assert first == second
+    assert second["train"] == 3 and second["test"] == 2
+
+
+def test_export_rejects_an_unknown_model_name(tmp_path):
+    from signature_training.export import repository
+
+    c = Config.load(overrides={"paths.models": str(tmp_path)})
+    with pytest.raises(ValueError, match="Unknown model name"):
+        repository.build(c, only=["vgg16_extractr"])

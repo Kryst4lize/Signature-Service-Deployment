@@ -103,12 +103,18 @@ docker compose exec training bash
 sigtrain --help
 ```
 
-On the NVIDIA network, put this in `training/.env` first:
+On the NVIDIA network, put this in `training/.env` first — assignments only,
+Compose rejects any line without `=`:
 
-```bash
+```ini
 TRAINING_BASE_IMAGE=10.254.144.152/tessel/training-service-base:0.0.1
 USE_INTERNAL_APT=1
-cp pip.conf.example pip.conf   # optional internal PyPI mirror
+```
+
+and, optionally, supply the internal PyPI mirror config:
+
+```bash
+cp pip.conf.example pip.conf
 ```
 
 ### Local
@@ -158,11 +164,14 @@ Skip what you have already done:
 sigtrain all --skip train-cyclegan data-cyclegan
 ```
 
-Override any setting without editing the config:
+Override any setting without editing the config. `--set` is accepted either
+before or after the stage name:
 
 ```bash
 sigtrain train-verification --set verification.phase1_epochs=5 \
                             --set verification.batch_size=16
+
+sigtrain --set verification.batch_size=16 train-verification
 ```
 
 ---

@@ -32,8 +32,9 @@ def person_dirs(test_dir: Path) -> list[Path]:
     )
     if not all_dirs:
         raise FileNotFoundError(
-            f"No person subfolders in {test_dir}. Point --test-dir at the folder "
-            "that *contains* the per-person directories."
+            f"No person subfolders in {test_dir}. paths.verification_dataset "
+            "must point at the folder whose train/ and test/ *contain* the "
+            "per-person directories. Run `sigtrain data-verification` first."
         )
     org = [d for d in all_dirs if d.name.endswith("_org")]
     chosen = org or all_dirs
