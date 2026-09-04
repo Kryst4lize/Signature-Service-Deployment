@@ -1,23 +1,52 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # PostgreSQL
+    # ── PostgreSQL ────────────────────────────────────────────────────────────
     postgres_host: str
-    postgres_port: int
+    postgres_port: int = 5432
     postgres_db: str
     postgres_user: str
     postgres_password: str
 
-    # Triton
+    # ── Triton ────────────────────────────────────────────────────────────────
     triton_host: str = "localhost"
     triton_http_port: int = 8000
-    triton_grpc_port: int = 8001
 
-    # App
+    # Model names as they appear in triton/model_repository/.
+    yolo_model: str = "yolov8s"
+    denoiser_model: str = "latest_net_G_B"
+    resnet_model: str = "resnet50_extractor"
+    vgg_model: str = "vgg16_extractor"
+
+    # ── Matching ──────────────────────────────────────────────────────────────
+    # Cosine distance (0 = identical, 1 = orthogonal, 2 = opposite) averaged over
+    # the two backbones. Calibrate against your own enrolled set: the training
+    # pipeline's `sigtrain evaluate` prints the EER threshold as a cosine
+    # *similarity* s, so set this to 1 - s.
+    match_threshold: float = 0.30
+
+    # YOLOv8 objectness below this is treated as "no signature on this page".
+    detection_confidence: float = 0.5
+
+    # ── Upload limits ─────────────────────────────────────────────────────────
+    max_upload_bytes: int = 20 * 1024 * 1024
+    max_pdf_pages: int = 20
+
+    # ── App ───────────────────────────────────────────────────────────────────
     app_env: str = "production"
+    # Comma-separated browser origins allowed to call this API.
+    cors_origins: list[str] = []
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     @property
     def database_url(self) -> str:

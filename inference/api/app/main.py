@@ -12,35 +12,33 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     triton = get_triton_service()
     await triton.connect()
-    print(f"[startup] Triton connected @ {settings.triton_http_url}")
+    logger.info("Triton client connected to %s", settings.triton_http_url)
     yield
     await triton.close()
-    print("[shutdown] Triton client closed")
+    logger.info("Triton client closed")
 
 
 app = FastAPI(
     title="Signature Verification API",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-# ── CORS: allow the frontend origin to call the API ───────────────────────────
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://10.207.178.239:8110",
-        "http://10.207.178.239:3000",   # frontend
-        "http://localhost:3000",         # local dev
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(sig_router, tags=["signatures"])
 
