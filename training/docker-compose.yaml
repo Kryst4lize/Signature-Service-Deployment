@@ -1,15 +1,42 @@
 services:
-  signature-minh:
-    image: training-service-base:0.0.1
-    container_name: signature-minh
-    restart: unless-stopped
+  training:
+    # The previous file referenced `training-service-base:0.0.1` with no build
+    # section, so `docker compose up` tried to pull that tag from Docker Hub and
+    # failed. It now builds from this directory.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TRAINING_BASE_IMAGE: ${TRAINING_BASE_IMAGE:-nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04}
+        USE_INTERNAL_APT: ${USE_INTERNAL_APT:-0}
+    image: signature-training:2.0.0
+    container_name: signature_training
+    working_dir: /workspace/training
     volumes:
-      - .:/workspace/train        # mount folder training của bạn vào container
-    working_dir: /workspace/train       # set thư mục làm việc
-    command: tail -f /dev/null
+      # Source is mounted so edits take effect without a rebuild (the package is
+      # pip-installed editable).
+      - ./src:/workspace/training/src
+      - ./configs:/workspace/training/configs
+      - ./assets:/workspace/training/assets
+      - ./tests:/workspace/training/tests
+      # Datasets and outputs, kept on the host: they are large and must survive
+      # the container.
+      - ./data:/workspace/training/data
+      - ./artifacts:/workspace/training/artifacts
+      - ./external:/workspace/training/external
+      # Export target — writes straight into the inference service.
+      - ../inference/triton/model_repository:/workspace/inference/triton/model_repository
+    environment:
+      # Keras/TF cache for the pretrained ImageNet weights, so a rebuild does
+      # not re-download ~600 MB.
+      KERAS_HOME: /workspace/training/artifacts/.keras
+      TF_CPP_MIN_LOG_LEVEL: "2"
+      WANDB_MODE: ${WANDB_MODE:-offline}
+    # CycleGAN's DataLoader workers need more than the 64 MB default.
+    shm_size: "8gb"
     tty: true
-    
-    shm_size: '8gb'
+    stdin_open: true
+    command: tail -f /dev/null
     deploy:
       resources:
         reservations:
