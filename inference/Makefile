@@ -36,10 +36,17 @@ test-integration: test-image  ## unit + endpoint tests against a throwaway pgvec
 	  -v "$(CURDIR)/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
 	  pgvector/pgvector:pg17 >/dev/null
 	@echo "waiting for postgres..."
-	@for i in $$(seq 1 30); do \
-	    docker exec $(PGTEST) pg_isready -U sig -d sig >/dev/null 2>&1 && break; \
+	@# -h 127.0.0.1 on purpose. Without it pg_isready probes the Unix socket,
+	@# which the entrypoint's *temporary* init server also serves (started with
+	@# `-c listen_addresses=''` to run docker-entrypoint-initdb.d). The probe can
+	@# then succeed while TCP is still closed and init.sql has not run, so the
+	@# loop breaks early and pytest fails with ConnectionRefusedError.
+	@for i in $$(seq 1 45); do \
+	    docker exec $(PGTEST) pg_isready -h 127.0.0.1 -U sig -d sig >/dev/null 2>&1 && break; \
 	    sleep 2; \
 	 done
+	@# The schema must exist too, not just the server.
+	@docker exec $(PGTEST) psql -U sig -d sig -c 'SELECT 1 FROM items LIMIT 1' >/dev/null
 	@docker run --rm --network $(PGNET) -v "$(CURDIR):/w" \
 	  -e TEST_DATABASE_URL=postgresql+asyncpg://sig:test@$(PGTEST):5432/sig \
 	  $(TEST_IMAGE) python -m pytest tests/ -q; \
