@@ -185,7 +185,7 @@ def _composite(
 # Scale logic  (DPI-aware)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _compute_target_stamp_px(crop_h: int, crop_w: int) -> int:
+def _compute_target_stamp_px(crop_h: int, crop_w: int, rng: random.Random) -> int:
     """
     Estimate a realistic stamp diameter in pixels for this crop size.
 
@@ -196,8 +196,8 @@ def _compute_target_stamp_px(crop_h: int, crop_w: int) -> int:
     regardless of how large the source stamp image actually is.
     This prevents high-res folder stamps from dominating the crop.
     """
-    dpi    = random.randint(SCAN_DPI_MIN, SCAN_DPI_MAX)
-    diam_mm = random.uniform(STAMP_DIAM_MM_MIN, STAMP_DIAM_MM_MAX)
+    dpi     = rng.randint(SCAN_DPI_MIN, SCAN_DPI_MAX)
+    diam_mm = rng.uniform(STAMP_DIAM_MM_MIN, STAMP_DIAM_MM_MAX)
     diam_px = diam_mm * dpi / 25.4          # convert mm → pixels at that DPI
 
     # The crop itself was extracted from the same scan, so we need the
@@ -225,6 +225,7 @@ def _placement(
     st_h: int,
     st_w: int,
     p_partial: float,
+    rng: random.Random,
 ) -> Tuple[int, int]:
     """
     Return (x, y) top-left for stamp placement.
@@ -238,28 +239,28 @@ def _placement(
     B  Corner bleed             : left + top or bottom off-frame
     C  Full stamp               : entirely inside crop (less common)
     """
-    rng = random.random()
+    draw = rng.random()
 
-    if rng < p_partial * 0.55:
+    if draw < p_partial * 0.55:
         # ── A: partial left ────────────────────────────────────────────────
-        vis = random.uniform(0.15, 0.55)
+        vis = rng.uniform(0.15, 0.55)
         x = -int(st_w * (1.0 - vis))
-        cy = int(crop_h * random.uniform(0.30, 0.70))
+        cy = int(crop_h * rng.uniform(0.30, 0.70))
         y = cy - st_h // 2
 
-    elif rng < p_partial:
+    elif draw < p_partial:
         # ── B: left + vertical bleed ───────────────────────────────────────
-        vis = random.uniform(0.15, 0.50)
+        vis = rng.uniform(0.15, 0.50)
         x = -int(st_w * (1.0 - vis))
-        if random.random() < 0.5:
-            y = -int(st_h * random.uniform(0.25, 0.55))   # top bleed
+        if rng.random() < 0.5:
+            y = -int(st_h * rng.uniform(0.25, 0.55))   # top bleed
         else:
-            y = int(crop_h - st_h * random.uniform(0.45, 0.75))  # bottom
+            y = int(crop_h - st_h * rng.uniform(0.45, 0.75))  # bottom
 
     else:
         # ── C: full stamp, left-biased ─────────────────────────────────────
-        x = random.randint(0, max(1, int(crop_w * 0.30)))
-        cy = int(crop_h * random.uniform(0.20, 0.65))
+        x = rng.randint(0, max(1, int(crop_w * 0.30)))
+        cy = int(crop_h * rng.uniform(0.20, 0.65))
         y = cy - st_h // 2
 
     return x, y
@@ -290,11 +291,16 @@ class StampAugmentor:
         p_partial: float = 0.68,
         opacity_range: Tuple[float, float] = (0.50, 0.92),
         angle_range: Tuple[float, float] = (-12.0, 12.0),
+        rng: Optional[random.Random] = None,
     ) -> None:
         self.p_apply        = p_apply
         self.p_partial      = p_partial
         self.opacity_range  = opacity_range
         self.angle_range    = angle_range
+        # Owned by the caller so one seed governs the whole dataset build.
+        # Using the module-level `random` made stamp placement depend on
+        # whatever else in the process had consumed from it.
+        self.rng            = rng if rng is not None else random.Random()
         self._stamps        = _load_stamps(stamp_folder)
 
         if not self._stamps:
@@ -308,13 +314,13 @@ class StampAugmentor:
         return self.apply(image)
 
     def apply(self, image: np.ndarray) -> np.ndarray:
-        if not self._stamps or random.random() > self.p_apply:
+        if not self._stamps or self.rng.random() > self.p_apply:
             return image
 
         h, w = image.shape[:2]
         stamp = self._prepare(h, w)
-        x, y  = _placement(h, w, stamp.shape[0], stamp.shape[1], self.p_partial)
-        opacity = random.uniform(*self.opacity_range)
+        x, y  = _placement(h, w, stamp.shape[0], stamp.shape[1], self.p_partial, self.rng)
+        opacity = self.rng.uniform(*self.opacity_range)
         return _composite(image, stamp, x, y, opacity)
 
     # ------------------------------------------------------------------
@@ -323,11 +329,11 @@ class StampAugmentor:
         Scale and rotate a random stamp so its size is physically realistic
         relative to this particular signature crop.
         """
-        raw = random.choice(self._stamps).copy()
+        raw = self.rng.choice(self._stamps).copy()
         raw_h, raw_w = raw.shape[:2]
 
         # DPI-aware target diameter in pixels
-        target_diam_px = _compute_target_stamp_px(crop_h, crop_w)
+        target_diam_px = _compute_target_stamp_px(crop_h, crop_w, self.rng)
 
         # Scale the stamp so its SHORT side equals target_diam_px
         # (stamps are roughly circular so either dimension works)
@@ -337,34 +343,8 @@ class StampAugmentor:
         stamp = cv2.resize(raw, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
         # Small rotation jitter
-        angle = random.uniform(*self.angle_range)
+        angle = self.rng.uniform(*self.angle_range)
         if abs(angle) > 0.5:
             stamp = _rotate_bgra(stamp, angle)
 
         return stamp
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Functional wrapper (mirrors add_random_straight_lines style)
-# ─────────────────────────────────────────────────────────────────────────────
-
-_DEFAULT_AUG: Optional[StampAugmentor] = None
-
-
-def add_stamp_noise(
-    image: np.ndarray,
-    height: int,
-    width: int,
-    stamp_folder: str = "stamp_noise",
-) -> np.ndarray:
-    """
-    Drop-in functional wrapper.
-
-        image = add_random_straight_lines(image, H, W)
-        image = add_random_text(image, H, W)
-        image = add_stamp_noise(image, H, W)
-    """
-    global _DEFAULT_AUG
-    if _DEFAULT_AUG is None:
-        _DEFAULT_AUG = StampAugmentor(stamp_folder=stamp_folder)
-    return _DEFAULT_AUG.apply(image)
