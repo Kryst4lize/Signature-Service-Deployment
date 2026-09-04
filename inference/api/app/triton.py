@@ -1,157 +1,158 @@
+"""Triton client.
+
+Every tensor crossing this module's public boundary is
+
+    float32, [1, 3, H, W], values in [0, 1], RGB channel order.
+
+Each model wants something different, and each of those conversions is applied
+here, immediately next to the inference call that needs it:
+
+    yolov8s             [0, 1] RGB          (ultralytics convention)
+    latest_net_G_B      [-1, 1] RGB         (CycleGAN Normalize(0.5, 0.5);
+                                             the generator ends in Tanh)
+    resnet50_extractor  Caffe BGR           (x*255, RGB->BGR, ImageNet mean
+    vgg16_extractor                          subtracted - what Keras
+                                             preprocess_input(mode="caffe") does)
+
+Getting any of these wrong is silent: the models still return well-formed
+tensors of the right shape, they are just computed on out-of-distribution input.
+"""
+
 import asyncio
 import logging
 from functools import lru_cache
 
 import numpy as np
 import tritonclient.http.aio as httpclient
-from PIL import Image as PILImage
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
-# ── size constants ─────────────────────────────────────────────────────────────
-YOLO_SIZE    = 640   # YOLOv8 input
-MODEL_SIZE   = 224   # CycleGAN / ResNet50 / VGG16 input
-CONF_THRESH  = 0.5  # YOLOv8 confidence threshold
+YOLO_SIZE = 640   # yolov8s input
+MODEL_SIZE = 224  # CycleGAN / ResNet50 / VGG16 input
+
+# keras.applications.imagenet_utils.preprocess_input(mode="caffe"), BGR order.
+_CAFFE_MEAN_BGR = np.array([103.939, 116.779, 123.68], dtype=np.float32).reshape(1, 3, 1, 1)
 
 
-def _resize_crop_to_model(crop_arr: np.ndarray) -> np.ndarray:
-    """[3, H, W] float32 → [1, 3, 224, 224] float32"""
-    logger.info("Resizing cropped array to model size (%dx%d)", MODEL_SIZE, MODEL_SIZE)
-    h, w = crop_arr.shape[1], crop_arr.shape[2]
-    pil = PILImage.fromarray(
-        (crop_arr.transpose(1, 2, 0) * 255).clip(0, 255).astype(np.uint8)
-    )
-    pil = pil.resize((MODEL_SIZE, MODEL_SIZE), PILImage.LANCZOS)
-    arr = np.array(pil, dtype=np.float32) / 255.0   # [H, W, 3]
-    arr = arr.transpose(2, 0, 1)[np.newaxis]        # [1, 3, 224, 224]
-    logger.info("Resized crop tensor shape: %s", arr.shape)
-    return arr
+def to_cyclegan(x: np.ndarray) -> np.ndarray:
+    """[0, 1] -> [-1, 1]."""
+    return x * 2.0 - 1.0
+
+
+def from_cyclegan(x: np.ndarray) -> np.ndarray:
+    """[-1, 1] Tanh output -> [0, 1]."""
+    return np.clip((x + 1.0) / 2.0, 0.0, 1.0)
+
+
+def to_caffe(x: np.ndarray) -> np.ndarray:
+    """[0, 1] RGB -> [0, 255] BGR with the ImageNet mean subtracted."""
+    bgr = x[:, ::-1, :, :] * 255.0
+    return (bgr - _CAFFE_MEAN_BGR).astype(np.float32)
+
+
+def l2_normalise(vec: np.ndarray) -> np.ndarray:
+    """Unit-length embedding, matching what the training and evaluation code
+    stores. Without this the cosine/L2 thresholds are meaningless."""
+    norm = float(np.linalg.norm(vec))
+    return (vec / norm).astype(np.float32) if norm > 0 else vec.astype(np.float32)
 
 
 class TritonService:
-
     def __init__(self) -> None:
         self._client: httpclient.InferenceServerClient | None = None
-        logger.info("TritonService initialized")
 
     async def connect(self) -> None:
-        logger.info("Connecting to Triton server at URL: %s", settings.triton_http_url)
         self._client = httpclient.InferenceServerClient(
             url=settings.triton_http_url, verbose=False
         )
-        logger.info("Connected to Triton server")
 
     async def close(self) -> None:
-        if self._client:
-            logger.info("Closing Triton client connection")
+        if self._client is not None:
             await self._client.close()
-            logger.info("Triton client connection closed")
+            self._client = None
 
     async def _infer(
         self,
         model_name: str,
-        inputs: list[httpclient.InferInput],
+        input_name: str,
+        tensor: np.ndarray,
         output_names: list[str],
     ) -> dict[str, np.ndarray]:
-        logger.info("Executing inference request on model: %s", model_name)
-        outputs = [httpclient.InferRequestedOutput(n) for n in output_names]
-        result  = await self._client.infer(
-            model_name=model_name, inputs=inputs, outputs=outputs
+        if self._client is None:
+            raise RuntimeError("Triton client is not connected")
+        inp = httpclient.InferInput(input_name, tensor.shape, "FP32")
+        inp.set_data_from_numpy(np.ascontiguousarray(tensor, dtype=np.float32))
+        result = await self._client.infer(
+            model_name=model_name,
+            inputs=[inp],
+            outputs=[httpclient.InferRequestedOutput(n) for n in output_names],
         )
-        logger.info("Inference completed on model: %s", model_name)
         return {n: result.as_numpy(n) for n in output_names}
 
-    # ── Model 1: yolov8s ──────────────────────────────────────────────────────
-    async def detect_signature(
-        self, image: np.ndarray  # [1, 3, 640, 640]
-    ) -> tuple[np.ndarray | None, list[float] | None]:
-        """
-        Returns (crop [1,3,224,224], bbox [x1,y1,x2,y2]) or (None, None).
-        output0 shape from Triton: [5, N]  →  rows = [cx, cy, w, h, conf]
-        """
-        logger.info("Starting detect_signature with model 'yolov8s'")
-        inp = httpclient.InferInput("images", image.shape, "FP32")
-        inp.set_data_from_numpy(image)
-        result = await self._infer("yolov8s", [inp], ["output0"])
+    # ── yolov8s ───────────────────────────────────────────────────────────────
 
-        raw = result["output0"]           # may be [5, N] or [1, 5, N]
+    async def detect_signature(self, page: np.ndarray) -> tuple[list[float], float] | None:
+        """Detect the highest-confidence signature on a 640x640 page tensor.
+
+        Returns (bbox, confidence) where bbox is [x1, y1, x2, y2] **normalised
+        to [0, 1]**, or None if nothing clears the confidence floor.
+
+        Normalised coordinates let the caller crop from the original
+        full-resolution page rather than from the 640x640 detector input, which
+        is what keeps the crop sharp enough for the extractors.
+        """
+        result = await self._infer(settings.yolo_model, "images", page, ["output0"])
+
+        raw = result["output0"]
         if raw.ndim == 3:
-            raw = raw[0]                  # → [5, N]
-
-        if raw.shape[1] == 0:
-            logger.info("detect_signature: No predictions returned from yolov8s")
-            return None, None
+            raw = raw[0]                       # [1, 5, N] -> [5, N]
+        if raw.size == 0 or raw.shape[1] == 0:
+            return None
 
         confidences = raw[4, :]
-        best        = int(np.argmax(confidences))
+        best = int(np.argmax(confidences))
+        conf = float(confidences[best])
+        if conf < settings.detection_confidence:
+            logger.info("Best detection %.3f below floor %.3f", conf, settings.detection_confidence)
+            return None
 
-        logger.info("Best YOLOv8 confidence score: %f", confidences[best])
-        if confidences[best] < CONF_THRESH:
-            logger.info("Confidence %f is below threshold %f. Discarding.", confidences[best], CONF_THRESH)
-            return None, None
-
-        cx, cy, w, h = float(raw[0, best]), float(raw[1, best]), \
-                       float(raw[2, best]), float(raw[3, best])
-
-        img_h, img_w = image.shape[2], image.shape[3]   # 640, 640
-        x1 = max(0,     int(cx - w / 2))
-        y1 = max(0,     int(cy - h / 2))
-        x2 = min(img_w, int(cx + w / 2))
-        y2 = min(img_h, int(cy + h / 2))
-
+        cx, cy, w, h = (float(raw[i, best]) for i in range(4))
+        x1 = max(0.0, (cx - w / 2) / YOLO_SIZE)
+        y1 = max(0.0, (cy - h / 2) / YOLO_SIZE)
+        x2 = min(1.0, (cx + w / 2) / YOLO_SIZE)
+        y2 = min(1.0, (cy + h / 2) / YOLO_SIZE)
         if x2 <= x1 or y2 <= y1:
-            logger.info("Invalid bounding box generated: [%d, %d, %d, %d]", x1, y1, x2, y2)
-            return None, None
+            logger.info("Degenerate bbox [%.3f %.3f %.3f %.3f]", x1, y1, x2, y2)
+            return None
 
-        bbox     = [x1, y1, x2, y2]
-        crop_arr = image[0, :, y1:y2, x1:x2]   # [3, H', W']
-        logger.info("Bounding box selected: %s. Proceeding to resize crop.", bbox)
-        crop_224 = _resize_crop_to_model(crop_arr)
+        return [x1, y1, x2, y2], conf
 
-        return crop_224, bbox
+    # ── latest_net_G_B (CycleGAN denoiser) ────────────────────────────────────
 
-    # ── Model 2: latest_net_G_B (CycleGAN) ───────────────────────────────────
     async def denoise(self, crop: np.ndarray) -> np.ndarray:
-        """Input/output: [1, 3, 224, 224]"""
-        logger.info("Starting denoise with model 'latest_net_G_B'")
-        inp = httpclient.InferInput("input", crop.shape, "FP32")
-        inp.set_data_from_numpy(crop)
-        result = await self._infer("latest_net_G_B", [inp], ["output"])
-        logger.info("Denoise completed")
-        return result["output"]
-
-    # ── Model 3 + 4: resnet50_extractor & vgg16_extractor ────────────────────
-    async def extract_features(
-        self, clean_image: np.ndarray  # [1, 3, 224, 224]
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Parallel inference. Returns (resnet_vec, vgg_vec) each [4096]."""
-        logger.info("Starting parallel feature extraction (ResNet50 & VGG16)")
-
-        # 1. ResNet50 expects channels first (NCHW: [1, 3, 224, 224])
-        # Send the exact same NCHW tensor to both models
-        resnet_inp = httpclient.InferInput("input_layer_1", clean_image.shape, "FP32")
-        resnet_inp.set_data_from_numpy(clean_image)
-
-        vgg_inp = httpclient.InferInput("input_layer", clean_image.shape, "FP32")
-        vgg_inp.set_data_from_numpy(clean_image)
-
-        logger.info("Awaiting resnet50_extractor and vgg16_extractor tasks")
-        resnet_res, vgg_res = await asyncio.gather(
-            self._infer("resnet50_extractor", [resnet_inp], ["fc1"]),
-            self._infer("vgg16_extractor",    [vgg_inp],    ["fc1"]),
+        """[1, 3, 224, 224] in [0, 1] -> denoised [1, 3, 224, 224] in [0, 1]."""
+        result = await self._infer(
+            settings.denoiser_model, "input", to_cyclegan(crop), ["output"]
         )
-        logger.info("Feature extraction successfully completed")
+        return from_cyclegan(result["output"])
 
+    # ── resnet50_extractor + vgg16_extractor ──────────────────────────────────
+
+    async def extract_features(self, clean: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """[1, 3, 224, 224] in [0, 1] -> two L2-normalised 4096-d embeddings."""
+        caffe = to_caffe(clean)
+        resnet_res, vgg_res = await asyncio.gather(
+            self._infer(settings.resnet_model, "input_layer_1", caffe, ["fc1"]),
+            self._infer(settings.vgg_model, "input_layer", caffe, ["fc1"]),
+        )
         return (
-            resnet_res["fc1"].flatten().astype(np.float32),
-            vgg_res["fc1"].flatten().astype(np.float32),
+            l2_normalise(resnet_res["fc1"].flatten()),
+            l2_normalise(vgg_res["fc1"].flatten()),
         )
 
 
 @lru_cache(maxsize=1)
 def get_triton_service() -> TritonService:
-    logger.info("Fetching TritonService singleton instance")
     return TritonService()

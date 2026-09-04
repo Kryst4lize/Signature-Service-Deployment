@@ -1,20 +1,85 @@
 import logging
-import numpy as np
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile 
-from sqlalchemy import select, text, func
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from PIL import Image, UnidentifiedImageError
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import Item, get_db
-from app.images import draw_bbox_on_tensor, load_image_as_tensor, tensor_to_b64
-from app.triton import TritonService, get_triton_service
+from app.images import draw_bbox, load_pages, pil_to_b64, pil_to_tensor, tensor_to_pil
+from app.triton import MODEL_SIZE, YOLO_SIZE, TritonService, get_triton_service
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 router = APIRouter()
 
+# Annotated pages are echoed back as base64; cap their long edge so a 200-dpi A4
+# scan does not turn into several MB of JSON per page.
+PREVIEW_MAX_EDGE = 1024
+
+_NEAREST_SQL = text(
+    """
+    SELECT id,
+           username,
+           (resnet50_vector <=> CAST(:rv AS vector)) AS d_resnet,
+           (vgg16_vector    <=> CAST(:vv AS vector)) AS d_vgg,
+           (
+               (resnet50_vector <=> CAST(:rv AS vector)) +
+               (vgg16_vector    <=> CAST(:vv AS vector))
+           ) / 2 AS avg_distance
+    FROM items
+    WHERE resnet50_vector IS NOT NULL
+      AND vgg16_vector    IS NOT NULL
+    ORDER BY avg_distance ASC
+    LIMIT 1
+    """
+)
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """Read an upload, refusing anything over the configured size cap."""
+    raw = await file.read(settings.max_upload_bytes + 1)
+    if len(raw) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {settings.max_upload_bytes} byte limit",
+        )
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    return raw
+
+
+def _decode(raw: bytes, filename: str) -> list[Image.Image]:
+    try:
+        return load_pages(raw, filename, settings.max_pdf_pages)
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="Unsupported or corrupt image file")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode file: {exc}")
+
+
+def _preview(img: Image.Image) -> tuple[Image.Image, float]:
+    """Downscale for the base64 preview echoed back in the response.
+
+    Returns the image and the scale factor applied, so callers can map
+    full-resolution coordinates onto the preview.
+    """
+    longest = max(img.size)
+    if longest <= PREVIEW_MAX_EDGE:
+        return img, 1.0
+    scale = PREVIEW_MAX_EDGE / longest
+    resized = img.resize(
+        (max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+        Image.LANCZOS,
+    )
+    return resized, scale
+
 
 # ══ GET /signatures ═══════════════════════════════════════════════════════════
+
 
 @router.get("/signatures")
 async def list_signatures(
@@ -22,26 +87,22 @@ async def list_signatures(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return all registered signature entries (no vectors)."""
-    logger.info("GET /signatures called with skip=%d, limit=%d", skip, limit)
-    total_result = await db.execute(select(func.count()).select_from(Item))
-    total = total_result.scalar()
-    logger.info("Total signature entries found in DB: %d", total)
-
-    result = await db.execute(
-        select(
-            Item.id,
-            Item.username,
-            Item.user_created_date,
-            Item.user_modified_date,
+    """Registered signature entries, newest first. Vectors are not returned."""
+    total = (await db.execute(select(func.count()).select_from(Item))).scalar()
+    rows = (
+        await db.execute(
+            select(
+                Item.id,
+                Item.username,
+                Item.user_created_date,
+                Item.user_modified_date,
+            )
+            .order_by(Item.user_created_date.desc())
+            .offset(skip)
+            .limit(limit)
         )
-        .offset(skip)
-        .limit(limit)
-        .order_by(Item.user_created_date.desc())
-    )
-    rows = result.mappings().all()
-    logger.info("Returning %d signature entries", len(rows))
-    
+    ).mappings().all()
+
     return {
         "total": total,
         "skip": skip,
@@ -50,62 +111,42 @@ async def list_signatures(
     }
 
 
-# ══ DELETE /signatures/{id} ════════════════════════════════════════════════════
+# ══ DELETE /signatures/{id} ═══════════════════════════════════════════════════
+
 
 @router.delete("/signatures/{item_id}", status_code=204)
 async def delete_signature(item_id: int, db: AsyncSession = Depends(get_db)):
-    logger.info("DELETE /signatures/%d called", item_id)
-    result = await db.execute(select(Item).where(Item.id == item_id))
-    item = result.scalar_one_or_none()
+    item = (await db.execute(select(Item).where(Item.id == item_id))).scalar_one_or_none()
     if item is None:
-        logger.info("Signature ID %d not found in DB", item_id)
         raise HTTPException(status_code=404, detail="Signature not found")
-    
     await db.delete(item)
-    logger.info("Successfully deleted signature ID %d", item_id)
 
 
 # ══ POST /register-signature ══════════════════════════════════════════════════
 
+
 @router.post("/register-signature", status_code=201)
 async def register_signature(
-    username: str = Form(...),
+    username: str = Form(..., min_length=1, max_length=50),
     file: UploadFile = File(..., description="Clean signature image (jpg/png)"),
     db: AsyncSession = Depends(get_db),
     triton: TritonService = Depends(get_triton_service),
 ):
+    """upload -> CycleGAN denoise -> ResNet50 + VGG16 -> INSERT.
+
+    Detection is skipped: the upload is assumed to be an isolated signature.
     """
-    Pipeline: upload → CycleGAN denoise → ResNet50 + VGG16 extract → INSERT
-    YOLOv8 detection is skipped: the uploaded file is already an isolated signature.
-    """
-    logger.info("POST /register-signature called for username: %s", username)
-    logger.info("Reading file: %s", file.filename)
-    raw = await file.read()
-    
-    try:
-        logger.info("Converting uploaded file to tensor (size: 224x224)")
-        tensors = load_image_as_tensor(raw, file.filename, size=(224, 224))
-    except Exception as exc:
-        logger.error("Could not decode image: %s", exc)
-        raise HTTPException(status_code=400, detail=f"Could not decode image: {exc}")
-
-    image = tensors[0]
+    raw = await _read_upload(file)
+    pages = _decode(raw, file.filename or "")
+    tensor = pil_to_tensor(pages[0], (MODEL_SIZE, MODEL_SIZE))
 
     try:
-        logger.info("Calling Triton denoise (CycleGAN)")
-        clean = await triton.denoise(image)
-    except Exception as exc:
-        logger.error("Triton CycleGAN error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Triton CycleGAN error: {exc}")
-
-    try:
-        logger.info("Calling Triton extract_features (ResNet50 + VGG16)")
+        clean = await triton.denoise(tensor)
         resnet_vec, vgg_vec = await triton.extract_features(clean)
     except Exception as exc:
-        logger.error("Triton extractor error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Triton extractor error: {exc}")
+        logger.exception("Triton inference failed during registration")
+        raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}")
 
-    logger.info("Instantiating new Item for DB insert")
     item = Item(
         username=username,
         resnet50_vector=resnet_vec.tolist(),
@@ -114,8 +155,7 @@ async def register_signature(
     db.add(item)
     await db.flush()
     await db.refresh(item)
-    
-    logger.info("Successfully registered signature for %s (ID: %d)", username, item.id)
+    logger.info("Registered signature %d for %s", item.id, username)
 
     return {
         "id": item.id,
@@ -124,7 +164,8 @@ async def register_signature(
     }
 
 
-# ══ POST /verify-document ══════════════════════════════════════════════════════
+# ══ POST /verify-document ═════════════════════════════════════════════════════
+
 
 @router.post("/verify-document")
 async def verify_document(
@@ -132,113 +173,91 @@ async def verify_document(
     db: AsyncSession = Depends(get_db),
     triton: TritonService = Depends(get_triton_service),
 ):
+    """upload -> pages -> YOLOv8 detect -> crop at full resolution
+    -> CycleGAN denoise -> ResNet50 + VGG16 -> pgvector cosine search.
     """
-    Pipeline: upload → (PDF→pages) → YOLOv8 detect → CycleGAN denoise
-              → ResNet50+VGG16 extract → pgvector L2 search → result + images
-    """
-    logger.info("POST /verify-document called for file: %s", file.filename)
-    raw = await file.read()
-    try:
-        logger.info("Loading document into pages/tensors")
-        pages = load_image_as_tensor(raw, file.filename)
-        logger.info("Document loaded successfully. Total pages: %d", len(pages))
-    except Exception as exc:
-        logger.error("Could not decode file: %s", exc)
-        raise HTTPException(status_code=400, detail=f"Could not decode file: {exc}")
+    raw = await _read_upload(file)
+    pages = _decode(raw, file.filename or "")
+    logger.info("Verifying %s (%d page(s))", file.filename, len(pages))
 
     results = []
-
-    for page_idx, page_tensor in enumerate(pages):
-        logger.info("--- Processing page %d of %d ---", page_idx + 1, len(pages))
+    for page_idx, page in enumerate(pages):
         entry: dict = {"page": page_idx + 1}
 
-        # ── Step 1: YOLOv8 detect ────────────────────────────────────────────
+        # ── Detect on a 640x640 view of the page ──────────────────────────────
         try:
-            logger.info("Step 1: Running YOLOv8 detection on page %d", page_idx + 1)
-            crop, bbox = await triton.detect_signature(page_tensor)
+            detection = await triton.detect_signature(
+                pil_to_tensor(page, (YOLO_SIZE, YOLO_SIZE))
+            )
         except Exception as exc:
-            logger.error("YOLOv8 detection failed on page %d: %s", page_idx + 1, exc)
+            logger.exception("Detection failed on page %d", page_idx + 1)
             entry.update({"status": "no_signature", "detail": str(exc)})
             results.append(entry)
             continue
 
-        if crop is None or crop.size == 0:
-            logger.info("No signature detected on page %d", page_idx + 1)
-            entry.update({"status": "no_signature"})
+        if detection is None:
+            entry["status"] = "no_signature"
             results.append(entry)
             continue
 
-        logger.info("Signature detected on page %d. BBox: %s", page_idx + 1, bbox)
-        # Annotate original page with red bbox
-        logger.info("Annotating original page with bounding box")
-        page_annotated_b64 = (
-            draw_bbox_on_tensor(page_tensor, bbox) if bbox else tensor_to_b64(page_tensor)
+        bbox_norm, confidence = detection
+
+        # ── Crop from the ORIGINAL page, not from the 640x640 detector input ──
+        # Cropping the detector input would bake its downsampling into the
+        # embedding, so a verified crop would be visibly blurrier than the sharp
+        # image the same signature was enrolled from.
+        width, height = page.size
+        box = (
+            int(bbox_norm[0] * width),
+            int(bbox_norm[1] * height),
+            int(bbox_norm[2] * width),
+            int(bbox_norm[3] * height),
         )
-        crop_before_b64 = tensor_to_b64(crop)
-        entry["bbox"] = bbox
-        entry["page_annotated"] = page_annotated_b64
-        entry["crop_before"] = crop_before_b64
+        crop = page.crop(box)
+        if crop.width < 2 or crop.height < 2:
+            entry["status"] = "no_signature"
+            results.append(entry)
+            continue
 
-        # ── Step 2: CycleGAN denoise ─────────────────────────────────────────
+        page_preview, scale = _preview(page)
+        entry["bbox"] = list(box)
+        entry["confidence"] = round(confidence, 4)
+        entry["page_annotated"] = draw_bbox(page_preview, [c * scale for c in box])
+        entry["crop_before"] = pil_to_b64(_preview(crop)[0])
+
+        # ── Denoise + embed ───────────────────────────────────────────────────
         try:
-            logger.info("Step 2: Denoising cropped signature (CycleGAN)")
-            clean = await triton.denoise(crop)
-        except Exception as exc:
-            logger.error("Triton CycleGAN error on page %d: %s", page_idx + 1, exc)
-            raise HTTPException(status_code=502, detail=f"Triton CycleGAN error: {exc}")
-
-        entry["crop_after"] = tensor_to_b64(clean)
-
-        # ── Step 3: feature extraction ───────────────────────────────────────
-        try:
-            logger.info("Step 3: Extracting features (ResNet50 + VGG16)")
+            clean = await triton.denoise(pil_to_tensor(crop, (MODEL_SIZE, MODEL_SIZE)))
             resnet_vec, vgg_vec = await triton.extract_features(clean)
         except Exception as exc:
-            logger.error("Triton extractor error on page %d: %s", page_idx + 1, exc)
-            raise HTTPException(status_code=502, detail=f"Triton extractor error: {exc}")
+            logger.exception("Triton inference failed on page %d", page_idx + 1)
+            raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}")
 
-        # ── Step 4: pgvector L2 nearest neighbour ────────────────────────────
-        logger.info("Step 4: Querying DB for L2 nearest neighbour")
-        row = await db.execute(
-            text("""
-                SELECT id, username,
-                       (resnet50_vector <-> CAST(:rv AS vector)) AS d_resnet,
-                       (vgg16_vector    <-> CAST(:vv AS vector)) AS d_vgg,
-                       (
-                           (resnet50_vector <-> CAST(:rv AS vector)) +
-                           (vgg16_vector    <-> CAST(:vv AS vector))
-                       ) / 2 AS avg_distance
-                FROM items
-                ORDER BY avg_distance ASC
-                LIMIT 1
-            """),
-            {
-                "rv": str(resnet_vec.tolist()), 
-                "vv": str(vgg_vec.tolist())
-            },
-        )
-        match = row.mappings().first()
+        entry["crop_after"] = pil_to_b64(tensor_to_pil(clean))
+
+        # ── Nearest neighbour by cosine distance ──────────────────────────────
+        match = (
+            await db.execute(
+                _NEAREST_SQL,
+                {"rv": str(resnet_vec.tolist()), "vv": str(vgg_vec.tolist())},
+            )
+        ).mappings().first()
 
         if match is None:
-            logger.info("No matching signature found in DB for page %d", page_idx + 1)
-            entry.update({"status": "no_match_in_db"})
+            entry["status"] = "no_match_in_db"
         else:
-            avg_dist = float(match["avg_distance"])
-            is_matched = avg_dist < 0.5
-            logger.info(
-                "DB search complete for page %d. Best match: %s, Avg Dist: %f, Matched: %s", 
-                page_idx + 1, match["username"], avg_dist, is_matched
+            avg = float(match["avg_distance"])
+            entry.update(
+                {
+                    "status": "matched",
+                    "username": match["username"],
+                    "avg_distance": round(avg, 6),
+                    "resnet_distance": round(float(match["d_resnet"]), 6),
+                    "vgg_distance": round(float(match["d_vgg"]), 6),
+                    "matched": avg < settings.match_threshold,
+                }
             )
-            entry.update({
-                "status": "matched",
-                "username": match["username"],
-                "avg_distance": round(avg_dist, 6),
-                "resnet_distance": round(float(match["d_resnet"]), 6),
-                "vgg_distance": round(float(match["d_vgg"]), 6),
-                "matched": is_matched,
-            })
 
         results.append(entry)
 
-    logger.info("Finished verifying document. Returning results for %d pages.", len(pages))
     return {"total_pages": len(pages), "results": results}
