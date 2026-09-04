@@ -72,20 +72,28 @@ def convert(
 def _simplify(proto):
     """Fold constants and drop no-op nodes.
 
-    Optional on purpose. The original script imported `onnxsim` unconditionally
-    while requirements.txt pinned the unrelated `onnxslim`, so a clean install
-    died with ModuleNotFoundError before converting anything.
+    Uses onnxslim, which is what requirements.txt has always pinned. The old
+    script imported `onnxsim` instead — a different project — so a clean install
+    died with ModuleNotFoundError before converting anything. onnxslim is the
+    right side of that mismatch to keep: it is pure Python with wheels for every
+    platform, whereas onnxsim has no aarch64 wheel and needs cmake and a C++
+    toolchain to build from source.
+
+    Still guarded, so simplification degrades to a warning rather than failing
+    an otherwise complete export.
     """
     try:
-        from onnxsim import simplify
+        import onnxslim
     except ImportError:
-        logger.warning("onnxsim not installed - skipping graph simplification")
+        logger.warning("onnxslim not installed - skipping graph simplification")
         return proto
 
-    simplified, ok = simplify(proto)
-    if not ok:
-        logger.warning("Simplified graph failed validation - keeping the original")
+    try:
+        simplified = onnxslim.slim(proto)
+    except Exception as exc:  # noqa: BLE001 - simplification is best-effort
+        logger.warning("Simplification failed (%s) - keeping the original graph", exc)
         return proto
+
     logger.info("Graph simplified")
     return simplified
 

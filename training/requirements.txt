@@ -15,7 +15,6 @@ torchvision==0.18.0
 # util/visualizer.py has a module-level `import wandb`; util/html.py imports
 # dominate. They look unused because the repo is cloned, not vendored.
 wandb==0.26.1
-visdom==0.2.4
 dominate==2.9.1
 
 # ── Detector export ───────────────────────────────────────────────────────────
@@ -25,11 +24,17 @@ ultralytics==8.3.49
 
 # ── ONNX ──────────────────────────────────────────────────────────────────────
 onnx==1.17.0
-tf2onnx==1.16.1
-# onnx-simplifier, imported as `onnxsim`. The previous file pinned `onnxslim`,
-# a different package that ships no `onnxsim` module, so the conversion script
-# died with ModuleNotFoundError on a clean install.
-onnxsim==0.4.36
+# 1.17.0, not 1.16.1: the older release pins protobuf~=3.20 while
+# tensorflow 2.21.0 requires protobuf>=6.31.1, which is unsatisfiable.
+# 1.17.0 relaxes it to protobuf>=3.20 and adds the Keras 3 compatibility
+# shims tf2onnx.convert.from_keras needs against this TensorFlow.
+tf2onnx==1.17.0
+# Graph simplification. The old converter imported `onnxsim` while this file
+# pinned `onnxslim` — different projects — so a clean install died with
+# ModuleNotFoundError before converting anything. Resolved in favour of
+# onnxslim: it is pure Python with wheels for every platform, whereas onnxsim
+# ships no aarch64 wheel and needs cmake plus a C++ toolchain to build.
+onnxslim==0.1.96
 
 # ── Data & numerics ───────────────────────────────────────────────────────────
 numpy==1.26.4
@@ -47,6 +52,12 @@ PyYAML==6.0.2
 tensorboard==2.18.0
 
 # Removed:
+#   visdom==0.2.4   Not imported anywhere upstream — it survives only in
+#                   comments and --help strings, and upstream's environment.yml
+#                   lists just dominate/Pillow/wandb. Its legacy setup.py also
+#                   imports pkg_resources without declaring setuptools, so it
+#                   fails to build against current setuptools:
+#                     ModuleNotFoundError: No module named 'pkg_resources'
 #   triton==2.3.0   This is openai/triton, the GPU kernel DSL - unrelated to
 #                   tritonclient. torch already declares it, guarded by
 #                   `platform_system == "Linux" and platform_machine == "x86_64"
