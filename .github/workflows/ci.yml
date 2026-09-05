@@ -1,0 +1,413 @@
+# CI — mirrors the stage structure of ClawRT's .gitlab-ci.yml.
+#
+# GitHub Actions has no `stages`, only jobs and `needs`. The stage order is
+# reproduced with `needs` edges, and each job is named `<stage>-<thing>` so the
+# two pipelines can be read side by side:
+#
+#     verify  ──> lint ──> test ──> build
+#                                     └──> security-container-cve-scan
+#     static-analysis-*   (no needs — starts immediately)
+#     security-source-*   (no needs — starts immediately)
+#
+# The static-analysis and security jobs deliberately carry no `needs`, which is
+# the same thing ClawRT achieves by putting them last in `stages` but giving
+# them `needs: []`: they sit at the end conceptually while starting as early as
+# possible, so they never delay the build.
+#
+# Stages NOT ported, because this repo has no infrastructure for them:
+#   promote, manifest, helm, deploy, smoke, follow-up, pages
+# They exist in ClawRT to move images between registry namespaces, assemble
+# multi-arch manifests, publish Helm charts, and deploy to an ephemeral kind
+# cluster. There is no registry, chart or cluster here to act on.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Mirrors ClawRT's `.lint` rule set: MRs, trunk, tags, and manual runs.
+# Scheduled pipelines are excluded there and there is no schedule here.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR pushes are cancelled; trunk and tag runs always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Pinned like every other tool in this repo. ClawRT learned this the hard way:
+  # a floating `ruff>=0.15` picked up a patch that broadened the default rule
+  # set and turned the job red against an unchanged tree.
+  UV_VERSION: "0.11.21"
+  RUFF_VERSION: "0.14.5"
+  HADOLINT_VERSION: "2.12.0"
+  TRIVY_VERSION: "0.58.1"
+
+jobs:
+  # ══ verify ══════════════════════════════════════════════════════════════════
+  # A tag is the release trigger, so the ref it points at is gated before
+  # anything is built. Runs on every event rather than only on tags: a skipped
+  # job in GitHub Actions also skips everything that `needs` it, so making this
+  # a no-op off-tag is what keeps it a real gate rather than an accidental one.
+  verify-release-ref:
+    name: verify / release-ref
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag must point at a commit contained in master
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "Not a tag ref — nothing to verify."
+            exit 0
+          fi
+          git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
+          if git branch -r --contains "${{ github.sha }}" \
+               | grep -qE '^[[:space:]]*origin/(master|release-v[0-9]+\.[0-9]+\.[0-9]+)$'; then
+            echo "OK: ${{ github.ref_name }} points at a commit contained in master or a release-v* branch."
+          else
+            echo "REFUSED: ${{ github.ref_name }} points at ${{ github.sha }}, which is not contained in"
+            echo "master or any release-v* branch. Tagging an unmerged commit ships code that was"
+            echo "never reviewed on trunk."
+            git branch -r --contains "${{ github.sha }}" || true
+            exit 1
+          fi
+
+  # ══ lint ════════════════════════════════════════════════════════════════════
+  lint-python:
+    name: lint / python
+    runs-on: ubuntu-latest
+    needs: [verify-release-ref]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      # uvx runs ruff in an ephemeral environment, so linting never installs
+      # TensorFlow or torch just to check formatting.
+      - name: ruff check
+        run: uvx --from "ruff==${RUFF_VERSION}" ruff check --output-format=github .
+
+      - name: ruff format --check
+        run: uvx --from "ruff==${RUFF_VERSION}" ruff format --check .
+
+  lint-docker:
+    name: lint / docker
+    runs-on: ubuntu-latest
+    needs: [verify-release-ref]
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile:
+          - inference/api/Dockerfile
+          - inference/tests/Dockerfile
+          - training/Dockerfile
+          - training/tests/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: hadolint ${{ matrix.dockerfile }}
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+          failure-threshold: warning
+          # DL3006: every `FROM ${...}` here resolves to an ARG whose default
+          #   IS explicitly tagged (python:3.11-slim-bookworm,
+          #   nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04). hadolint does not
+          #   substitute ARG defaults into FROM, so it reports all four as
+          #   untagged. Verified: with this ignore the four files are clean.
+          # DL3008: apt pins are handled by the base image, not per-package.
+          # DL3013/DL3042: pip is not used any more; uv manages installs.
+          ignore: DL3006,DL3008,DL3013,DL3042
+
+  lint-lockfiles:
+    name: lint / lockfiles
+    runs-on: ubuntu-latest
+    needs: [verify-release-ref]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      # The images build with `uv sync --frozen`, which fails on a stale lock.
+      # Catching that here means the failure lands on the PR that caused it
+      # rather than on whoever next tries to build an image.
+      - name: uv.lock is up to date (inference)
+        run: uv lock --check --project inference/api
+
+      - name: uv.lock is up to date (training)
+        run: uv lock --check --project training
+
+      # training/tests/Dockerfile duplicates ~10 pins from uv.lock on purpose —
+      # syncing the full 9.6 GB locked set would make `make test` useless as a
+      # feedback loop. This is what stops that copy from rotting.
+      - name: tests/Dockerfile pins agree with uv.lock
+        run: uv run --no-project --python 3.11 python training/scripts/check_test_pins.py
+
+  # ══ test ════════════════════════════════════════════════════════════════════
+  # Both jobs shell out to the repo's own make targets rather than
+  # reimplementing the setup in YAML. That is deliberate: `make test` and
+  # `make test-integration` are what contributors run locally, so CI cannot
+  # drift into testing something different from what they do.
+  test-training:
+    name: test / training
+    runs-on: ubuntu-latest
+    needs: [lint-python, lint-docker, lint-lockfiles]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: make test
+        working-directory: training
+        run: make test PYTEST_ARGS="--junitxml=/w/report.xml"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-training
+          path: training/report.xml
+          retention-days: 7
+
+  test-inference:
+    name: test / inference
+    runs-on: ubuntu-latest
+    needs: [lint-python, lint-docker, lint-lockfiles]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Spins up its own pgvector container and tears it down, so the endpoint
+      # tests run against the real schema — the pgvector cast, the cosine
+      # ordering and the VARCHAR(50) limit have no in-memory equivalent.
+      - name: make test-integration
+        working-directory: inference
+        run: make test-integration PYTEST_ARGS="--junitxml=/w/report.xml"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-inference
+          path: inference/report.xml
+          retention-days: 7
+
+  # ══ build ═══════════════════════════════════════════════════════════════════
+  # Mirrors ClawRT's build rules: an untagged build is proof the image still
+  # builds and is then discarded with the runner. Nothing is pushed here, so a
+  # pull request can never publish an artifact.
+  build-api:
+    name: build / api
+    runs-on: ubuntu-latest
+    needs: [test-training, test-inference]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: inference/api
+          push: false
+          load: true
+          tags: signature-inference-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Handed to security-container-cve-scan, mirroring ClawRT's
+      # `needs: [{job: build-api, artifacts: true}]`.
+      - name: Export the image for scanning
+        run: docker save signature-inference-api:${{ github.sha }} -o /tmp/api-image.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-image
+          path: /tmp/api-image.tar
+          retention-days: 1
+
+  build-training:
+    name: build / training
+    runs-on: ubuntu-latest
+    needs: [test-training, test-inference]
+    # Tags and manual runs only. The training image is ~9.6 GB (CUDA 12.1 +
+    # TensorFlow + torch) against roughly 14 GB of free disk on a hosted
+    # runner, so building it on every pull request is neither affordable nor
+    # informative — the API image already proves the uv install path works.
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      # ~9 GB of preinstalled toolchains this build does not use.
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the training image
+        uses: docker/build-push-action@v6
+        with:
+          context: training
+          push: false
+          load: false          # never materialised locally; disk is the constraint
+          tags: signature-training:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ══ static-analysis ═════════════════════════════════════════════════════════
+  # No `needs`: these start immediately and run alongside lint/test.
+  static-analysis-types-inference:
+    name: static-analysis / ty (inference)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: inference/api/uv.lock
+
+      - name: ty check
+        working-directory: inference
+        run: uv run --project api ty check api/app
+
+  static-analysis-types-training:
+    name: static-analysis / ty (training)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: training/uv.lock
+
+      # This installs the full locked set (~3 GB of CUDA wheels) because ty
+      # resolves third-party imports from the environment. Cached between runs;
+      # the first run on a changed lockfile is slow.
+      - name: ty check
+        working-directory: training
+        run: uv run ty check src
+
+  static-analysis-codeql:
+    name: static-analysis / codeql
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # Both halves are pure Python; no build step to observe.
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:python
+
+  # ══ security ════════════════════════════════════════════════════════════════
+  # `continue-on-error` mirrors ClawRT's `allow_failure: true` on its scan jobs:
+  # a new CVE disclosed upstream must not turn an unrelated pull request red.
+  # Findings still surface in the run summary and in code scanning.
+  security-source-cve-scan:
+    name: security / source cve scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-fs.sarif
+          exit-code: "0"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-source-cve
+
+  security-source-secret-scan:
+    name: security / source secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Not allowed to fail. ClawRT's equivalent (Pulse TruffleHog) blocks on a
+      # verified finding for the same reason: a leaked credential is not a
+      # backlog item. This repo has had two tokens pasted into it in the past,
+      # so the gate earns its place.
+      - name: Trivy secret scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+
+  security-container-cve-scan:
+    name: security / container cve scan
+    runs-on: ubuntu-latest
+    needs: [build-api]
+    permissions:
+      contents: read
+      security-events: write
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: api-image
+          path: /tmp
+
+      - name: Load the image
+        run: docker load -i /tmp/api-image.tar
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: image
+          image-ref: signature-inference-api:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: "0"
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-container-cve

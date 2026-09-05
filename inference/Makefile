@@ -3,6 +3,8 @@
 COMPOSE    := docker compose
 DEV        := -f docker-compose.yml -f docker-compose.dev.yml
 TEST_IMAGE := sigverify-api-test
+# Extra pytest flags, e.g. PYTEST_ARGS='--junitxml=report.xml'
+PYTEST_ARGS ?=
 PGTEST     := sigverify_pgtest
 PGNET      := sigverify_testnet
 
@@ -41,7 +43,7 @@ test-image:                ## build the test runner image
 
 test: test-image           ## unit tests, no services required
 	docker run --rm -v "$(CURDIR):/w" $(TEST_IMAGE) \
-	  python -m pytest tests/test_tensors.py -q
+	  python -m pytest tests/test_tensors.py -q $(PYTEST_ARGS)
 
 test-integration: test-image  ## unit + endpoint tests against a throwaway pgvector
 	@-docker network create $(PGNET) >/dev/null 2>&1
@@ -64,7 +66,7 @@ test-integration: test-image  ## unit + endpoint tests against a throwaway pgvec
 	@docker exec $(PGTEST) psql -U sig -d sig -c 'SELECT 1 FROM items LIMIT 1' >/dev/null
 	@docker run --rm --network $(PGNET) -v "$(CURDIR):/w" \
 	  -e TEST_DATABASE_URL=postgresql+asyncpg://sig:test@$(PGTEST):5432/sig \
-	  $(TEST_IMAGE) python -m pytest tests/ -q; \
+	  $(TEST_IMAGE) python -m pytest tests/ -q $(PYTEST_ARGS); \
 	  status=$$?; \
 	  docker rm -f $(PGTEST) >/dev/null 2>&1; \
 	  exit $$status
