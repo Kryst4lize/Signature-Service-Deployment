@@ -1,36 +1,58 @@
-*.jpg
-*.png
-*.pdf
-*.plan
+# ── Model weights & compiled artifacts (hosted outside git) ───────────────────
 *.h5
 *.keras
 *.pth
+*.pt
 *.onnx
 *.trt
+*.plan
+*.engine
 *.bin
-*.pt
 
-# Python cache
-__pycache__
+# ── Datasets & generated media ────────────────────────────────────────────────
+*.jpg
+*.jpeg
+*.png
+*.pdf
+!docs/**/*.png
 
-# Virtual environment
-venv
-**/.env*
-**/*.v2
+# ── Secrets & machine-local config ────────────────────────────────────────────
+# Real .env files never get committed; the *.example templates always do.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 
-# Jupyter notebook checkpoints
+# pip.conf points at an internal mirror and is machine-specific.
+# The committed template is pip.conf.example.
+pip.conf
+!pip.conf.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Notebooks ─────────────────────────────────────────────────────────────────
 .ipynb_checkpoints
 
-# Temporary files
+# ── Temporary ─────────────────────────────────────────────────────────────────
 *.tmp
 *.log
+*.v2
 
-# PyInstaller
-*.spec
-build
-dist
-*.conf
-pip.conf
-
-# External repositories (clone separately)
+# ── External repositories (cloned, not vendored) ──────────────────────────────
 pytorch-CycleGAN-and-pix2pix/
