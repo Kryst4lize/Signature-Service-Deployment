@@ -121,11 +121,13 @@ cp pip.conf.example pip.conf
 
 ```bash
 cd training/
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
-sigtrain --help
+uv sync                  # creates .venv from uv.lock and installs the project
+uv run sigtrain --help
 ```
+
+`uv sync` provisions the interpreter `.python-version` pins, so no `venv`,
+`activate` or system Python is needed. To change a dependency, edit
+`pyproject.toml` and run `make lock`.
 
 ### Data
 
@@ -269,11 +271,34 @@ the resulting `.pt` there.
 ## Tests
 
 ```bash
-make test
+make test          # in Docker: no GPU, no TensorFlow, no torch, ~1s
+uv run pytest      # on the host, against the locked environment
 ```
 
-No GPU, no TensorFlow, no torch: the suite covers dataset construction,
-augmentation determinism, config resolution, metrics, pair building and the CLI.
+The suite covers dataset construction, augmentation determinism, config
+resolution, metrics, pair building, config.pbtxt generation and the CLI.
+
+---
+
+## Toolchain
+
+Astral's toolchain throughout: [uv](https://docs.astral.sh/uv/) for packaging,
+[ruff](https://docs.astral.sh/ruff/) for lint and format,
+[ty](https://docs.astral.sh/ty/) for type checking. All three are pinned in the
+`dev` dependency group, so everyone runs the same versions.
+
+```bash
+make lint            # ruff check
+make format          # ruff format
+make typecheck       # ty check
+make check           # all three, read-only — what CI would run
+make lock            # re-resolve uv.lock after editing pyproject.toml
+make test-lock-drift # tests/Dockerfile pins still agree with uv.lock
+```
+
+Lint rules live in the repo-root [`ruff.toml`](../ruff.toml) and govern both
+halves. `uv.lock` is committed and authoritative: the images build with
+`uv sync --frozen`, which fails rather than silently re-resolving.
 
 ---
 

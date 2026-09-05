@@ -58,9 +58,10 @@ inference/
 ├── Makefile
 ├── api/
 │   ├── Dockerfile
+│   ├── pyproject.toml          dependencies (locked in uv.lock)
+│   ├── uv.lock
 │   ├── pip.conf.example        internal PyPI mirror template
 │   ├── local-repository-config internal apt mirror
-│   ├── requirements.txt
 │   └── app/
 │       ├── main.py             app factory, lifespan, CORS, /health
 │       ├── config.py           env-driven settings
@@ -258,11 +259,35 @@ their signatures are.
 ```bash
 make test              # tensor conventions only, no services needed
 make test-integration  # + endpoint tests against a throwaway pgvector container
+
+uv run --project api pytest tests/test_tensors.py   # on the host, no Docker
 ```
 
 Triton is faked (no GPU required). Postgres is real for the endpoint tests,
 because the pgvector cast, the cosine ordering and the `VARCHAR(50)` limit have
 no meaningful in-memory equivalent.
+
+---
+
+## Toolchain
+
+Astral's toolchain throughout: [uv](https://docs.astral.sh/uv/) for packaging,
+[ruff](https://docs.astral.sh/ruff/) for lint and format,
+[ty](https://docs.astral.sh/ty/) for type checking. All three are pinned in the
+`dev` dependency group.
+
+```bash
+make lint        # ruff check
+make format      # ruff format
+make typecheck   # ty check
+make check       # all three, read-only — what CI would run
+make lock        # re-resolve api/uv.lock after editing api/pyproject.toml
+```
+
+Lint rules live in the repo-root [`ruff.toml`](../ruff.toml) and govern both
+halves. `api/uv.lock` is committed and authoritative: the image builds with
+`uv sync --frozen`, which fails rather than silently re-resolving — so a
+deployment can never run versions nobody chose.
 
 ---
 
