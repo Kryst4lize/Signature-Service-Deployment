@@ -1,4 +1,4 @@
-.PHONY: help build up shell down test test-image pipeline clean
+.PHONY: help build up shell down test test-image lint format typecheck check lock test-lock-drift pipeline clean
 
 COMPOSE    := docker compose
 TEST_IMAGE := signature-training-test
@@ -17,6 +17,24 @@ shell: up              ## open a shell inside it
 
 down:                  ## stop it
 	$(COMPOSE) down
+
+lock:                  ## refresh uv.lock from pyproject.toml
+	uv lock
+
+lint:                  ## ruff check
+	uv run ruff check .
+
+format:                ## ruff format
+	uv run ruff format .
+
+typecheck:             ## ty check
+	uv run ty check src
+
+check: lint typecheck  ## lint + typecheck, no formatting changes
+	uv run ruff format --check .
+
+test-lock-drift:       ## fail if tests/Dockerfile pins drift from uv.lock
+	@uv run python scripts/check_test_pins.py
 
 test-image:            ## build the lightweight test runner
 	docker build -q -t $(TEST_IMAGE) -f tests/Dockerfile .

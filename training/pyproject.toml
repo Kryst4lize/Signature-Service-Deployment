@@ -1,38 +1,102 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "signature-training"
 version = "2.0.0"
 description = "Training pipeline for the signature detection, denoising and verification system"
-requires-python = ">=3.10"
 readme = "README.md"
-# No `license` key. `{ file = "../LICENSE" }` escapes the project root, and
-# setuptools' expand.read_files() refuses that with
-#   DistutilsOptionError: Cannot access '.../training/../LICENSE'
-# (setuptools 59 in the current image tolerates it; newer versions do not).
-# The repository LICENSE (Apache-2.0) governs; it is not duplicated here.
+# Pinned rather than ">=3.10" so uv.lock targets one interpreter. torch 2.3.0
+# ships cp38-cp312 wheels and tensorflow 2.21 needs >=3.10, so 3.11 is inside
+# both windows.
+requires-python = "==3.11.*"
 
-# Runtime dependencies live in requirements.txt, which is what the Docker image
-# installs. They are intentionally not duplicated here: the deep-learning stack
-# needs exact pins chosen against a specific CUDA base image, which is a
-# deployment concern rather than a library-compatibility range.
-dependencies = []
+# No `license` key. `{ file = "../LICENSE" }` escapes the project root, which
+# build backends refuse to read. The repository LICENSE (Apache-2.0) governs.
+
+dependencies = [
+    # ── Deep learning ─────────────────────────────────────────────────────────
+    # On linux x86_64 torch pulls ~1.7 GB of nvidia-* CUDA wheels. It is needed
+    # only for CycleGAN training and the .pth -> ONNX export; see the `cpu`
+    # extra below if you train CycleGAN elsewhere.
+    "tensorflow==2.21.0",
+    "torch==2.3.0",
+    "torchvision==0.18.0",
+
+    # ── CycleGAN (the upstream repo imports these unconditionally) ─────────────
+    # util/visualizer.py has a module-level `import wandb`; util/html.py imports
+    # dominate. They look unused here because the repo is cloned, not vendored.
+    "wandb==0.26.1",
+    "dominate==2.9.1",
+
+    # ── Detector export ───────────────────────────────────────────────────────
+    # Was missing entirely: the YOLO export step was documented but
+    # unimplemented, and both old converters imported ultralytics undeclared.
+    "ultralytics==8.3.49",
+
+    # ── ONNX ──────────────────────────────────────────────────────────────────
+    "onnx==1.17.0",
+    # 1.17.0, not 1.16.1: the older release pins protobuf~=3.20 while
+    # tensorflow 2.21.0 requires protobuf>=6.31.1, which is unsatisfiable.
+    # 1.17.0 relaxes it and adds the Keras 3 shims from_keras needs.
+    "tf2onnx==1.17.0",
+    # Graph simplification. The old converter imported `onnxsim` while the
+    # requirements pinned `onnxslim` — different projects. Resolved in favour of
+    # onnxslim: pure Python with wheels for every platform, where onnxsim ships
+    # no aarch64 wheel and needs cmake plus a C++ toolchain.
+    "onnxslim==0.1.96",
+
+    # ── Data & numerics ───────────────────────────────────────────────────────
+    "numpy==1.26.4",
+    "scipy==1.14.1",
+    "scikit-learn==1.5.2",
+    "pillow==11.0.0",
+    # headless: nothing here calls imshow/namedWindow/waitKey across 23 cv2 call
+    # sites, and the GUI build fails to import in a slim container for want of
+    # libGL.
+    "opencv-python-headless==4.10.0.84",
+    "matplotlib==3.9.3",
+    "tqdm==4.67.1",
+    "pyyaml==6.0.2",
+
+    # ── Experiment tracking ───────────────────────────────────────────────────
+    # Not a tensorflow dependency (it stopped being one), so it has to be
+    # explicit: the Keras TensorBoard callback writes event files without it,
+    # but `tensorboard --logdir` is how anyone reads them. Kept in step with the
+    # tensorflow minor rather than pinned independently, which is how the old
+    # `tensorboard==2.18.0` came to sit under `tensorflow==2.21.0`.
+    "tensorboard==2.21.0",
+]
+
+# Deliberately absent:
+#   visdom          Not imported anywhere upstream — only comments and --help
+#                   strings — and its legacy setup.py imports pkg_resources
+#                   without declaring setuptools, so it fails to build.
+#   triton          openai/triton, the GPU kernel DSL, unrelated to
+#                   tritonclient. torch declares it already behind platform
+#                   markers; pinning it unconditionally broke installs on
+#                   macOS, aarch64 and Python 3.12+.
+#   protobuf        Let tensorflow/onnx resolve a mutually compatible version.
+#   setuptools      Build-time only.
+#   python-dotenv   Configuration is configs/*.yaml.
 
 [project.scripts]
 sigtrain = "signature_training.cli:main"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+[dependency-groups]
+# PEP 735. `uv sync` installs these; `uv sync --no-dev` (what the image uses)
+# does not.
+dev = [
+    "pytest==8.3.4",
+    "ruff==0.14.5",
+    "ty==0.0.14",
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
 
-[tool.setuptools.package-data]
-"*" = ["*.yaml", "*.ttf"]
+[tool.uv.build-backend]
+module-name = "signature_training"
+module-root = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
 filterwarnings = ["ignore::DeprecationWarning"]
