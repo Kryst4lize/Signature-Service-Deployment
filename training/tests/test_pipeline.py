@@ -11,7 +11,6 @@ from signature_training.config import Config
 from signature_training.data import cyclegan
 from signature_training.evaluate import pairs
 
-
 # ── dataset builder ───────────────────────────────────────────────────────────
 
 
@@ -135,7 +134,7 @@ def test_people(tmp_path):
 
 
 def test_pairs_include_both_classes_and_skip_forgeries(test_people):
-    scores, labels = pairs.build(test_people, _fake_embedder(), impostor_pairs_per_couple=4)
+    _scores, labels = pairs.build(test_people, _fake_embedder(), impostor_pairs_per_couple=4)
     assert set(labels) == {0, 1}
     # 4 people x C(4,2) within-person pairs
     assert (labels == 1).sum() == 4 * 6

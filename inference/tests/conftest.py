@@ -8,9 +8,9 @@ os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("TRITON_HOST", "localhost")
 
-import numpy as np  # noqa: E402
-import pytest  # noqa: E402
-from PIL import Image  # noqa: E402
+import numpy as np
+import pytest
+from PIL import Image
 
 
 @pytest.fixture

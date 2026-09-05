@@ -54,11 +54,15 @@ def _decode(raw: bytes, filename: str) -> list[Image.Image]:
     try:
         return load_pages(raw, filename, settings.max_pdf_pages)
     except UnidentifiedImageError:
-        raise HTTPException(status_code=400, detail="Unsupported or corrupt image file")
+        raise HTTPException(
+            status_code=400, detail="Unsupported or corrupt image file"
+        ) from None
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not decode file: {exc}")
+        raise HTTPException(
+            status_code=400, detail=f"Could not decode file: {exc}"
+        ) from exc
 
 
 def _preview(img: Image.Image) -> tuple[Image.Image, float]:
@@ -145,7 +149,9 @@ async def register_signature(
         resnet_vec, vgg_vec = await triton.extract_features(clean)
     except Exception as exc:
         logger.exception("Triton inference failed during registration")
-        raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}")
+        raise HTTPException(
+            status_code=502, detail=f"Triton inference error: {exc}"
+        ) from exc
 
     item = Item(
         username=username,
@@ -231,7 +237,9 @@ async def verify_document(
             resnet_vec, vgg_vec = await triton.extract_features(clean)
         except Exception as exc:
             logger.exception("Triton inference failed on page %d", page_idx + 1)
-            raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}")
+            raise HTTPException(
+                status_code=502, detail=f"Triton inference error: {exc}"
+            ) from exc
 
         entry["crop_after"] = pil_to_b64(tensor_to_pil(clean))
 

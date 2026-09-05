@@ -112,7 +112,11 @@ class Config:
     # ── construction ──────────────────────────────────────────────────────────
 
     @classmethod
-    def load(cls, path: str | Path | None = None, overrides: dict[str, Any] | None = None) -> Config:
+    def load(
+        cls,
+        path: str | Path | None = None,
+        overrides: dict[str, Any] | None = None,
+    ) -> Config:
         data: dict[str, Any] = {}
         if path is not None:
             with open(path) as fh:

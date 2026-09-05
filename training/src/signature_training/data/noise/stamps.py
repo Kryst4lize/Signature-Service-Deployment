@@ -31,12 +31,9 @@ Key realism improvements over a naïve overlay
 import glob
 import os
 import random
-from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-
-
 
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +86,7 @@ def _remove_background(bgr: np.ndarray) -> np.ndarray:
     return bgra
 
 
-def _load_stamps(folder: str) -> List[np.ndarray]:
+def _load_stamps(folder: str) -> list[np.ndarray]:
     """
     Load every stamp image in `folder` as a BGRA array, ready for compositing.
     White background is removed; achromatic (greyscale/black) stamps are
@@ -97,12 +94,12 @@ def _load_stamps(folder: str) -> List[np.ndarray]:
     """
     exts = [e for base in ("*.jpg", "*.jpeg", "*.png", "*.bmp")
             for e in (base, base.upper())]
-    paths: List[str] = []
+    paths: list[str] = []
     for e in exts:
         paths.extend(glob.glob(os.path.join(folder, e)))
     paths = list(set(paths))
 
-    stamps: List[np.ndarray] = []
+    stamps: list[np.ndarray] = []
     for p in paths:
         img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
         if img is None:
@@ -153,15 +150,18 @@ def _composite(
     bg_h, bg_w = bg.shape[:2]
     st_h, st_w = stamp_bgra.shape[:2]
 
-    sx0 = max(0, -x);      sy0 = max(0, -y)
+    sx0 = max(0, -x)
+    sy0 = max(0, -y)
     sx1 = min(st_w, bg_w - x)
     sy1 = min(st_h, bg_h - y)
 
     if sx1 <= sx0 or sy1 <= sy0:
         return bg
 
-    dx0 = x + sx0;  dy0 = y + sy0
-    dx1 = x + sx1;  dy1 = y + sy1
+    dx0 = x + sx0
+    dy0 = y + sy0
+    dx1 = x + sx1
+    dy1 = y + sy1
 
     crop  = stamp_bgra[sy0:sy1, sx0:sx1]
     alpha = crop[:, :, 3:4].astype(np.float32) / 255.0 * opacity
@@ -185,31 +185,35 @@ def _composite(
 # Scale logic  (DPI-aware)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _compute_target_stamp_px(crop_h: int, crop_w: int, rng: random.Random) -> int:
+def _compute_target_stamp_px(crop_h: int, rng: random.Random) -> int:
     """
     Estimate a realistic stamp diameter in pixels for this crop size.
 
     Method
     ------
-    We simulate a random scan DPI, compute how many pixels a standard
-    Vietnamese round stamp would occupy, then return that value —
-    regardless of how large the source stamp image actually is.
-    This prevents high-res folder stamps from dominating the crop.
-    """
-    dpi     = rng.randint(SCAN_DPI_MIN, SCAN_DPI_MAX)
-    diam_mm = rng.uniform(STAMP_DIAM_MM_MIN, STAMP_DIAM_MM_MAX)
-    diam_px = diam_mm * dpi / 25.4          # convert mm → pixels at that DPI
+    Simulate a scan DPI, convert a standard Vietnamese seal diameter to pixels
+    at that DPI, and return it — regardless of how large the source stamp image
+    is. That is what stops a 1000 px folder stamp from dominating the crop.
 
-    # The crop itself was extracted from the same scan, so we need the
-    # stamp diameter expressed in *crop* pixels.
-    # We treat the crop short-side as our reference: a signature crop of
-    # height H came from a region whose physical size ≈ H * 25.4 / dpi mm.
-    # The stamp should be diam_mm of that region.
-    short = min(crop_h, crop_w)
-    crop_mm = short * 25.4 / dpi
-    # fraction of crop covered by stamp diameter
-    frac = diam_mm / crop_mm
-    target_px = int(short * frac)
+    Only `crop_h` is consulted, and only for the upper clamp.
+    """
+    dpi = rng.randint(SCAN_DPI_MIN, SCAN_DPI_MAX)
+    diam_mm = rng.uniform(STAMP_DIAM_MM_MIN, STAMP_DIAM_MM_MAX)
+
+    # mm -> pixels at that DPI. This is already the answer.
+    #
+    # The previous code computed it, discarded it, and then re-derived the same
+    # number the long way round via the crop short-side:
+    #
+    #     crop_mm   = short * 25.4 / dpi
+    #     frac      = diam_mm / crop_mm
+    #     target_px = short * frac
+    #               = short * diam_mm * dpi / (short * 25.4)
+    #               = diam_mm * dpi / 25.4
+    #
+    # `short` cancels exactly, so the detour never depended on the crop size and
+    # the first assignment was flagged as unused. Ruff (F841) found it.
+    target_px = int(diam_mm * dpi / 25.4)
 
     # Safety clamp: stamp cannot be smaller than 40 px or 3× the crop height
     return max(40, min(target_px, 3 * crop_h))
@@ -226,7 +230,7 @@ def _placement(
     st_w: int,
     p_partial: float,
     rng: random.Random,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     """
     Return (x, y) top-left for stamp placement.
 
@@ -289,9 +293,9 @@ class StampAugmentor:
         stamp_folder: str = "stamp_noise",
         p_apply: float = 0.70,
         p_partial: float = 0.68,
-        opacity_range: Tuple[float, float] = (0.50, 0.92),
-        angle_range: Tuple[float, float] = (-12.0, 12.0),
-        rng: Optional[random.Random] = None,
+        opacity_range: tuple[float, float] = (0.50, 0.92),
+        angle_range: tuple[float, float] = (-12.0, 12.0),
+        rng: random.Random | None = None,
     ) -> None:
         self.p_apply        = p_apply
         self.p_partial      = p_partial
@@ -333,7 +337,7 @@ class StampAugmentor:
         raw_h, raw_w = raw.shape[:2]
 
         # DPI-aware target diameter in pixels
-        target_diam_px = _compute_target_stamp_px(crop_h, crop_w, self.rng)
+        target_diam_px = _compute_target_stamp_px(crop_h, self.rng)
 
         # Scale the stamp so its SHORT side equals target_diam_px
         # (stamps are roughly circular so either dimension works)

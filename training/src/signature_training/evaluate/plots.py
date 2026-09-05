@@ -14,12 +14,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")  # no display in a training container
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from scipy.special import ndtri  # noqa: E402
+mpl.use("Agg")  # no display in a training container
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.special import ndtri
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +103,10 @@ def comparison(results: list[dict], out_dir: Path) -> None:
     colors = [ROC_C, IMPOSTOR_C]
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(14, 4))
-    for ax, (title, key) in zip(axes, metrics):
+    for ax, (title, key) in zip(axes, metrics, strict=True):
         vals = [r[key] for r in results]
         bars = ax.bar(names, vals, color=colors[: len(names)])
-        for bar, v in zip(bars, vals):
+        for bar, v in zip(bars, vals, strict=True):
             ax.text(bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + max(vals) * 0.02,
                     f"{v:.4f}", ha="center", va="bottom", fontsize=9)

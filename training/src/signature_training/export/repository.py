@@ -63,10 +63,11 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
     wanted_extractors = [
         b for b in keras_onnx.INPUT_NAMES if selected(f"{b}_extractor")
     ]
-    for name, path in keras_onnx.convert_extractors(
-        models_dir, onnx_dir, cfg, backbones=wanted_extractors
-    ).items():
-        exported[name] = path
+    exported.update(
+        keras_onnx.convert_extractors(
+            models_dir, onnx_dir, cfg, backbones=wanted_extractors
+        )
+    )
 
     # ── denoiser ──────────────────────────────────────────────────────────────
     if selected(DENOISER_NAME):
@@ -121,7 +122,9 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
         )
         logger.info("Staged %s -> %s", model_name, model_dir)
 
-    missing = {DETECTOR_NAME, DENOISER_NAME, "resnet50_extractor", "vgg16_extractor"} - set(exported)
+    missing = {
+        DETECTOR_NAME, DENOISER_NAME, "resnet50_extractor", "vgg16_extractor"
+    } - set(exported)
     if missing and only is None:
         logger.warning(
             "Model repository is incomplete: %s missing. Triton will fail to "

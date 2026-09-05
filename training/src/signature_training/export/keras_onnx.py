@@ -41,9 +41,9 @@ def convert(
     opset: int = 13,
     simplify_graph: bool = True,
 ) -> Path:
+    import onnx
     import tensorflow as tf
     import tf2onnx
-    import onnx
 
     keras_path, onnx_path = Path(keras_path), Path(onnx_path)
     if not keras_path.is_file():
@@ -98,7 +98,7 @@ def _simplify(proto):
 
     try:
         simplified = onnxslim.slim(proto)
-    except Exception as exc:  # noqa: BLE001 - simplification is best-effort
+    except Exception as exc:
         logger.warning("Simplification failed (%s) - keeping the original graph", exc)
         return proto
 

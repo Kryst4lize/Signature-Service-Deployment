@@ -75,14 +75,14 @@ def _generators(cfg: Config, backbone: str):
         cval=_WHITE_AFTER_CAFFE,     # see the note above
         validation_split=v.val_split,
     )
-    common = dict(
-        directory=str(filtered),
-        target_size=(v.image_size, v.image_size),
-        color_mode="rgb",
-        batch_size=v.batch_size,
-        class_mode="categorical",
-        seed=v.seed,
-    )
+    common = {
+        "directory": str(filtered),
+        "target_size": (v.image_size, v.image_size),
+        "color_mode": "rgb",
+        "batch_size": v.batch_size,
+        "class_mode": "categorical",
+        "seed": v.seed,
+    }
     train_gen = aug.flow_from_directory(**common, shuffle=True, subset="training")
     val_gen = aug.flow_from_directory(**common, shuffle=False, subset="validation")
 

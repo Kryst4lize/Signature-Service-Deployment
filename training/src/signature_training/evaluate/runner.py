@@ -81,8 +81,8 @@ def evaluate_one(cfg: Config, backbone: str, extractor_path: Path, test_dir: Pat
         "match_threshold_for_service": 1.0 - eer_threshold,
         "auc": float(roc_auc),
         "dprime": dprime,
-        "genuine_pairs": int(len(genuine)),
-        "impostor_pairs": int(len(impostor)),
+        "genuine_pairs": len(genuine),
+        "impostor_pairs": len(impostor),
         "resolvable_far": floor,
         "genuine_mean": float(genuine.mean()),
         "impostor_mean": float(impostor.mean()),
@@ -106,7 +106,8 @@ def _report(r: dict, tar: dict, fnmr: dict, genuine: np.ndarray, impostor: np.nd
         f"  d-prime          {r['dprime']:>8.4f}     higher is better (> 2.0 good)",
         f"  {sep}",
         f"  EER threshold    {r['eer_threshold']:>8.4f}     cosine SIMILARITY",
-        f"  -> set inference MATCH_THRESHOLD={r['match_threshold_for_service']:.4f}  (cosine DISTANCE)",
+        f"  -> set inference MATCH_THRESHOLD="
+        f"{r['match_threshold_for_service']:.4f}  (cosine DISTANCE)",
         f"  {sep}",
     ]
     for target in (0.05, 0.01, 0.001):

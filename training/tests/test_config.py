@@ -69,7 +69,7 @@ def test_unknown_override_target_is_rejected():
 
 
 def test_malformed_override_is_rejected():
-    with pytest.raises(ValueError, match="section.field"):
+    with pytest.raises(ValueError, match=r"section\.field"):
         Config.load(overrides={"batch_size": "8"})
 
 

@@ -16,12 +16,14 @@ import os
 
 import tensorflow as tf
 from tensorflow.keras import layers, models
-from tensorflow.keras.applications import ResNet50, VGG16
+from tensorflow.keras.applications import VGG16, ResNet50
 
 logger = logging.getLogger(__name__)
 
 
-def build_vgg16(num_classes: int, embedding_dim: int = 4096, weights_path: str = "") -> tf.keras.Model:
+def build_vgg16(
+    num_classes: int, embedding_dim: int = 4096, weights_path: str = ""
+) -> tf.keras.Model:
     """VGG16 with its 1000-way head replaced.
 
     VGG16's own `fc1` is already 4096-d, so the extractor tap needs no extra

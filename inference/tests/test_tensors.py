@@ -17,7 +17,6 @@ from app.triton import (
     to_cyclegan,
 )
 
-
 # ── Base convention: [1, 3, H, W] float32 in [0, 1], RGB ──────────────────────
 
 
@@ -26,7 +25,7 @@ def test_pil_to_tensor_shape_range_and_channel_order(rgb_image):
 
     assert t.shape == (1, 3, 224, 224)
     assert t.dtype == np.float32
-    assert 0.0 <= t.min() and t.max() <= 1.0
+    assert t.min() >= 0.0 and t.max() <= 1.0
 
     # Left third is red: channel 0 high, channels 1 and 2 low.
     left = t[0, :, :, :50]

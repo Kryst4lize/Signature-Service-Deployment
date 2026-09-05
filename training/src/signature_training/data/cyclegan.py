@@ -21,7 +21,6 @@ Two behavioural fixes over the original dataset_preparation.py:
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import cv2
@@ -106,7 +105,7 @@ def build(cfg: Config) -> dict[str, int]:
         for path in tqdm(items, desc=f"  {split}", unit="img"):
             try:
                 clean, noisy = _make_pair(path, document, stamper, data_cfg.image_size)
-            except Exception as exc:  # noqa: BLE001 - collected and reported below
+            except Exception as exc:
                 failures.append((path, str(exc)))
                 continue
             stem = path.stem

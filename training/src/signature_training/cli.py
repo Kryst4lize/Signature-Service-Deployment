@@ -125,7 +125,7 @@ def stage_export(cfg: Config, args) -> None:
 
     produced = repository.build(cfg, only=getattr(args, "only", None))
     print(f"\nTriton model repository at {cfg.paths.resolve('triton_repository')}:")
-    for name, path in produced.items():
+    for name in produced:
         print(f"  {name}/1/model.onnx  +  config.pbtxt")
     print("\nStart the service with:  cd ../inference && docker compose up -d")
 
