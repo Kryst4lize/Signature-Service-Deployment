@@ -1,0 +1,72 @@
+[project]
+name = "signature-inference-api"
+version = "2.0.0"
+description = "FastAPI service for signature detection, denoising and verification"
+requires-python = "==3.11.*"
+
+# Exact pins, resolved into uv.lock. The image is the deployment artifact, so
+# two builds of the same commit must produce the same dependency set — that is
+# what `uv sync --frozen` guarantees and a floating range does not.
+dependencies = [
+    # ── API ───────────────────────────────────────────────────────────────────
+    "fastapi==0.115.6",
+    # [standard] already provides uvloop and httptools; listing them separately
+    # only creates a second place for the versions to drift.
+    "uvicorn[standard]==0.32.1",
+    # >= 0.0.18 for CVE-2024-53981: a multipart body of bare CRs kept the parser
+    # in a per-byte loop, so a ~1.5 MiB upload burned ~42 s of CPU on one worker.
+    # Both /register-signature and /verify-document are unauthenticated
+    # multipart endpoints, so this was directly reachable.
+    "python-multipart==0.0.20",
+
+    # ── Database ──────────────────────────────────────────────────────────────
+    "asyncpg==0.30.0",
+    "sqlalchemy[asyncio]==2.0.36",
+    "pgvector==0.3.6",
+
+    # ── Triton client ─────────────────────────────────────────────────────────
+    # Held at 2.46.0 to match the tritonserver:24.01-py3 image compose pins.
+    # Only tritonclient.http.aio is imported; the [grpc] extra was also listed
+    # and pulled grpcio + protobuf for code that does not exist.
+    # (2.52.0 would cap numpy<2; 2.72.0 requires Python >= 3.12.)
+    "tritonclient[http]==2.46.0",
+
+    # ── Image & PDF ───────────────────────────────────────────────────────────
+    "pillow==11.0.0",
+    # numpy stays on 1.x: tritonclient 2.46.0 is the version tested against the
+    # pinned server, and nothing here needs the 2.x API.
+    "numpy==1.26.4",
+    "pdf2image==1.17.0",
+
+    # ── Config ────────────────────────────────────────────────────────────────
+    "pydantic-settings==2.7.0",
+]
+
+# Deliberately absent, each verified unimported by the service:
+#   alembic                  no migrations/ exists; the schema is postgres/init.sql
+#   opencv-python-headless   no cv2 anywhere under app/ (only training uses it)
+#   python-dotenv            pydantic-settings brings its own .env reader
+#   tritonclient[grpc]       unused
+
+[dependency-groups]
+# PEP 735 groups. Installed by `uv sync`, excluded by `uv sync --no-dev`, which
+# is what the runtime image uses.
+dev = [
+    "pytest==8.3.4",
+    "httpx==0.28.1",
+    "anyio==4.7.0",
+    "ruff==0.14.5",
+    "ty==0.0.14",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

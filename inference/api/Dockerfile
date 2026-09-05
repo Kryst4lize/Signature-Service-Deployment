@@ -5,12 +5,25 @@
 #   API_BASE_IMAGE=10.254.144.152/tessel/python:3.11-slim-bookworm
 #   USE_INTERNAL_APT=1
 ARG API_BASE_IMAGE=python:3.11-slim-bookworm
+# Pinned: uv is part of the build toolchain, so it is versioned like everything
+# else rather than floating on :latest.
+ARG UV_VERSION=0.11.21
 
 # ── Stage 1: dependency builder ───────────────────────────────────────────────
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 FROM ${API_BASE_IMAGE} AS builder
+COPY --from=uv /uv /usr/local/bin/uv
 
 ARG USE_INTERNAL_APT=0
-WORKDIR /build
+WORKDIR /app
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    # Use the base image's interpreter rather than fetching a second one;
+    # pyproject.toml requires ==3.11.*, which python:3.11-slim satisfies.
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 
 # Both files are optional. The bracket glob matches zero files without failing
 # the build, which is what lets a public-registry build run without the
@@ -21,9 +34,16 @@ RUN if [ "$USE_INTERNAL_APT" = "1" ] && [ -f /opt/netcfg/local-repository-config
     fi; \
     if [ -f /opt/netcfg/pip.conf ]; then cp /opt/netcfg/pip.conf /etc/pip.conf; fi
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Dependencies first, without the project, so editing app/ does not invalidate
+# the dependency layer. --frozen fails rather than silently re-resolving if
+# uv.lock is out of date with pyproject.toml.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+
+COPY app/ ./app/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
@@ -32,7 +52,8 @@ FROM ${API_BASE_IMAGE} AS runtime
 ARG USE_INTERNAL_APT=0
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Ho_Chi_Minh
+    TZ=Asia/Ho_Chi_Minh \
+    PATH="/opt/venv/bin:$PATH"
 
 COPY local-repository-confi[g] /opt/netcfg/
 RUN if [ "$USE_INTERNAL_APT" = "1" ] && [ -f /opt/netcfg/local-repository-config ]; then \
@@ -53,7 +74,9 @@ RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime \
 RUN groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser
 
 WORKDIR /app
-COPY --from=builder /install /usr/local
+# The venv lives outside /app so the bind mount in docker-compose.dev.yml
+# cannot shadow it.
+COPY --from=builder /opt/venv /opt/venv
 COPY app/ ./app/
 
 RUN chown -R appuser:appuser /app
