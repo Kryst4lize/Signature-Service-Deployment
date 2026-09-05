@@ -46,11 +46,11 @@ def build_vgg16(
         logger.info("VGG16: loaded ImageNet weights")
 
     model = models.Sequential(name="vgg16_classifier")
-    for layer in base.layers[:-1]:          # drop predictions (1000-way)
+    for layer in base.layers[:-1]:  # drop predictions (1000-way)
         model.add(layer)
     model.add(layers.Dense(num_classes, activation="softmax", name="predictions"))
 
-    for layer in model.layers[:-1]:         # phase 1: head only
+    for layer in model.layers[:-1]:  # phase 1: head only
         layer.trainable = False
     return model
 
@@ -81,8 +81,8 @@ def build_resnet50(
     for layer in base.layers:
         layer.trainable = False
 
-    x = base.get_layer("conv5_block3_out").output       # (7, 7, 2048)
-    x = layers.GlobalAveragePooling2D(name="gap")(x)    # 2048-d
+    x = base.get_layer("conv5_block3_out").output  # (7, 7, 2048)
+    x = layers.GlobalAveragePooling2D(name="gap")(x)  # 2048-d
     x = layers.Dense(embedding_dim, activation="relu", name="fc1")(x)
     x = layers.Dropout(0.30)(x)
     out = layers.Dense(num_classes, activation="softmax", name="predictions")(x)

@@ -57,6 +57,7 @@ STAMP_CROP_RATIO_MAX: float = 1.80
 # Colour helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _is_achromatic(bgr: np.ndarray, mask: np.ndarray) -> bool:
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     mean_sat = float(cv2.mean(hsv[:, :, 1], mask=mask)[0])
@@ -67,7 +68,7 @@ def _tint_red(bgra: np.ndarray, strength: float = 0.60) -> np.ndarray:
     """Push ink colour toward Vietnamese official red (#D0021B-ish)."""
     out = bgra.astype(np.float32)
     # Target: approximately (B=30, G=20, R=210)
-    out[:, :, 2] = np.clip(out[:, :, 2] + strength * 160, 0, 255)   # R ↑
+    out[:, :, 2] = np.clip(out[:, :, 2] + strength * 160, 0, 255)  # R ↑
     out[:, :, 1] = np.clip(out[:, :, 1] * (1 - strength * 0.8), 0, 255)  # G ↓
     out[:, :, 0] = np.clip(out[:, :, 0] * (1 - strength * 0.8), 0, 255)  # B ↓
     return out.astype(np.uint8)
@@ -76,6 +77,7 @@ def _tint_red(bgra: np.ndarray, strength: float = 0.60) -> np.ndarray:
 # ─────────────────────────────────────────────────────────────────────────────
 # Stamp preparation
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _remove_background(bgr: np.ndarray) -> np.ndarray:
     """Return BGRA with white/near-white pixels made transparent."""
@@ -92,8 +94,7 @@ def _load_stamps(folder: str) -> list[np.ndarray]:
     White background is removed; achromatic (greyscale/black) stamps are
     tinted red to match Vietnamese ink regulations.
     """
-    exts = [e for base in ("*.jpg", "*.jpeg", "*.png", "*.bmp")
-            for e in (base, base.upper())]
+    exts = [e for base in ("*.jpg", "*.jpeg", "*.png", "*.bmp") for e in (base, base.upper())]
     paths: list[str] = []
     for e in exts:
         paths.extend(glob.glob(os.path.join(folder, e)))
@@ -129,7 +130,9 @@ def _rotate_bgra(bgra: np.ndarray, angle: float) -> np.ndarray:
     M[0, 2] += new_w / 2 - cx
     M[1, 2] += new_h / 2 - cy
     return cv2.warpAffine(
-        bgra, M, (new_w, new_h),
+        bgra,
+        M,
+        (new_w, new_h),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=(0, 0, 0, 0),
@@ -139,6 +142,7 @@ def _rotate_bgra(bgra: np.ndarray, angle: float) -> np.ndarray:
 # ─────────────────────────────────────────────────────────────────────────────
 # Compositing
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _composite(
     bg: np.ndarray,
@@ -163,14 +167,14 @@ def _composite(
     dx1 = x + sx1
     dy1 = y + sy1
 
-    crop  = stamp_bgra[sy0:sy1, sx0:sx1]
+    crop = stamp_bgra[sy0:sy1, sx0:sx1]
     alpha = crop[:, :, 3:4].astype(np.float32) / 255.0 * opacity
 
-    fg     = crop[:, :, :3].astype(np.float32) / 255.0   # stamp  [0,1]
+    fg = crop[:, :, :3].astype(np.float32) / 255.0  # stamp  [0,1]
     bg_roi = bg[dy0:dy1, dx0:dx1].astype(np.float32) / 255.0  # bg [0,1]
 
     # ── Multiply blend: signature ink wins over stamp ink ──────────────────
-    multiplied = fg * bg_roi                               # both darken each other
+    multiplied = fg * bg_roi  # both darken each other
 
     # Blend between original background and the multiply result
     # using stamp alpha as the mix weight — stamp only shows where it has ink
@@ -184,6 +188,7 @@ def _composite(
 # ─────────────────────────────────────────────────────────────────────────────
 # Scale logic  (DPI-aware)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _compute_target_stamp_px(crop_h: int, rng: random.Random) -> int:
     """
@@ -223,6 +228,7 @@ def _compute_target_stamp_px(crop_h: int, rng: random.Random) -> int:
 # Placement logic  (Vietnamese rule)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _placement(
     crop_h: int,
     crop_w: int,
@@ -257,7 +263,7 @@ def _placement(
         vis = rng.uniform(0.15, 0.50)
         x = -int(st_w * (1.0 - vis))
         if rng.random() < 0.5:
-            y = -int(st_h * rng.uniform(0.25, 0.55))   # top bleed
+            y = -int(st_h * rng.uniform(0.25, 0.55))  # top bleed
         else:
             y = int(crop_h - st_h * rng.uniform(0.45, 0.75))  # bottom
 
@@ -273,6 +279,7 @@ def _placement(
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class StampAugmentor:
     """
@@ -297,18 +304,19 @@ class StampAugmentor:
         angle_range: tuple[float, float] = (-12.0, 12.0),
         rng: random.Random | None = None,
     ) -> None:
-        self.p_apply        = p_apply
-        self.p_partial      = p_partial
-        self.opacity_range  = opacity_range
-        self.angle_range    = angle_range
+        self.p_apply = p_apply
+        self.p_partial = p_partial
+        self.opacity_range = opacity_range
+        self.angle_range = angle_range
         # Owned by the caller so one seed governs the whole dataset build.
         # Using the module-level `random` made stamp placement depend on
         # whatever else in the process had consumed from it.
-        self.rng            = rng if rng is not None else random.Random()
-        self._stamps        = _load_stamps(stamp_folder)
+        self.rng = rng if rng is not None else random.Random()
+        self._stamps = _load_stamps(stamp_folder)
 
         if not self._stamps:
             import warnings
+
             warnings.warn(
                 f"StampAugmentor: no stamp images found in '{stamp_folder}'.",
                 stacklevel=2,
@@ -323,7 +331,7 @@ class StampAugmentor:
 
         h, w = image.shape[:2]
         stamp = self._prepare(h, w)
-        x, y  = _placement(h, w, stamp.shape[0], stamp.shape[1], self.p_partial, self.rng)
+        x, y = _placement(h, w, stamp.shape[0], stamp.shape[1], self.p_partial, self.rng)
         opacity = self.rng.uniform(*self.opacity_range)
         return _composite(image, stamp, x, y, opacity)
 

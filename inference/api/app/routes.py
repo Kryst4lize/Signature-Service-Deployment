@@ -54,15 +54,11 @@ def _decode(raw: bytes, filename: str) -> list[Image.Image]:
     try:
         return load_pages(raw, filename, settings.max_pdf_pages)
     except UnidentifiedImageError:
-        raise HTTPException(
-            status_code=400, detail="Unsupported or corrupt image file"
-        ) from None
+        raise HTTPException(status_code=400, detail="Unsupported or corrupt image file") from None
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=400, detail=f"Could not decode file: {exc}"
-        ) from exc
+        raise HTTPException(status_code=400, detail=f"Could not decode file: {exc}") from exc
 
 
 def _preview(img: Image.Image) -> tuple[Image.Image, float]:
@@ -94,18 +90,22 @@ async def list_signatures(
     """Registered signature entries, newest first. Vectors are not returned."""
     total = (await db.execute(select(func.count()).select_from(Item))).scalar()
     rows = (
-        await db.execute(
-            select(
-                Item.id,
-                Item.username,
-                Item.user_created_date,
-                Item.user_modified_date,
+        (
+            await db.execute(
+                select(
+                    Item.id,
+                    Item.username,
+                    Item.user_created_date,
+                    Item.user_modified_date,
+                )
+                .order_by(Item.user_created_date.desc())
+                .offset(skip)
+                .limit(limit)
             )
-            .order_by(Item.user_created_date.desc())
-            .offset(skip)
-            .limit(limit)
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
 
     return {
         "total": total,
@@ -149,9 +149,7 @@ async def register_signature(
         resnet_vec, vgg_vec = await triton.extract_features(clean)
     except Exception as exc:
         logger.exception("Triton inference failed during registration")
-        raise HTTPException(
-            status_code=502, detail=f"Triton inference error: {exc}"
-        ) from exc
+        raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}") from exc
 
     item = Item(
         username=username,
@@ -192,9 +190,7 @@ async def verify_document(
 
         # ── Detect on a 640x640 view of the page ──────────────────────────────
         try:
-            detection = await triton.detect_signature(
-                pil_to_tensor(page, (YOLO_SIZE, YOLO_SIZE))
-            )
+            detection = await triton.detect_signature(pil_to_tensor(page, (YOLO_SIZE, YOLO_SIZE)))
         except Exception as exc:
             logger.exception("Detection failed on page %d", page_idx + 1)
             entry.update({"status": "no_signature", "detail": str(exc)})
@@ -237,19 +233,21 @@ async def verify_document(
             resnet_vec, vgg_vec = await triton.extract_features(clean)
         except Exception as exc:
             logger.exception("Triton inference failed on page %d", page_idx + 1)
-            raise HTTPException(
-                status_code=502, detail=f"Triton inference error: {exc}"
-            ) from exc
+            raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}") from exc
 
         entry["crop_after"] = pil_to_b64(tensor_to_pil(clean))
 
         # ── Nearest neighbour by cosine distance ──────────────────────────────
         match = (
-            await db.execute(
-                _NEAREST_SQL,
-                {"rv": str(resnet_vec.tolist()), "vv": str(vgg_vec.tolist())},
+            (
+                await db.execute(
+                    _NEAREST_SQL,
+                    {"rv": str(resnet_vec.tolist()), "vv": str(vgg_vec.tolist())},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
 
         if match is None:
             entry["status"] = "no_match_in_db"

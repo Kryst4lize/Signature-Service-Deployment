@@ -56,13 +56,10 @@ def main() -> int:
             continue
         if name not in locked:
             problems.append(
-                f"  {name}=={version} is pinned in tests/Dockerfile "
-                "but absent from uv.lock"
+                f"  {name}=={version} is pinned in tests/Dockerfile but absent from uv.lock"
             )
         elif locked[name] != version:
-            problems.append(
-                f"  {name}: tests/Dockerfile has {version}, uv.lock has {locked[name]}"
-            )
+            problems.append(f"  {name}: tests/Dockerfile has {version}, uv.lock has {locked[name]}")
 
     if problems:
         print("tests/Dockerfile has drifted from uv.lock:")

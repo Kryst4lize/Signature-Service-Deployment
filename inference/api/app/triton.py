@@ -29,7 +29,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-YOLO_SIZE = 640   # yolov8s input
+YOLO_SIZE = 640  # yolov8s input
 MODEL_SIZE = 224  # CycleGAN / ResNet50 / VGG16 input
 
 # keras.applications.imagenet_utils.preprocess_input(mode="caffe"), BGR order.
@@ -64,9 +64,7 @@ class TritonService:
         self._client: httpclient.InferenceServerClient | None = None
 
     async def connect(self) -> None:
-        self._client = httpclient.InferenceServerClient(
-            url=settings.triton_http_url, verbose=False
-        )
+        self._client = httpclient.InferenceServerClient(url=settings.triton_http_url, verbose=False)
 
     async def close(self) -> None:
         if self._client is not None:
@@ -107,7 +105,7 @@ class TritonService:
 
         raw = result["output0"]
         if raw.ndim == 3:
-            raw = raw[0]                       # [1, 5, N] -> [5, N]
+            raw = raw[0]  # [1, 5, N] -> [5, N]
         if raw.size == 0 or raw.shape[1] == 0:
             return None
 
@@ -133,9 +131,7 @@ class TritonService:
 
     async def denoise(self, crop: np.ndarray) -> np.ndarray:
         """[1, 3, 224, 224] in [0, 1] -> denoised [1, 3, 224, 224] in [0, 1]."""
-        result = await self._infer(
-            settings.denoiser_model, "input", to_cyclegan(crop), ["output"]
-        )
+        result = await self._infer(settings.denoiser_model, "input", to_cyclegan(crop), ["output"])
         return from_cyclegan(result["output"])
 
     # ── resnet50_extractor + vgg16_extractor ──────────────────────────────────

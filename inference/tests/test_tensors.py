@@ -55,9 +55,7 @@ def test_to_cyclegan_maps_unit_range_to_symmetric_range():
 
 
 def test_from_cyclegan_inverts_to_cyclegan(unit_tensor):
-    np.testing.assert_allclose(
-        from_cyclegan(to_cyclegan(unit_tensor)), unit_tensor, atol=1e-6
-    )
+    np.testing.assert_allclose(from_cyclegan(to_cyclegan(unit_tensor)), unit_tensor, atol=1e-6)
 
 
 def test_from_cyclegan_recovers_the_negative_half():

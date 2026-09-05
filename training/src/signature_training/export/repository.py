@@ -39,7 +39,8 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
     onnx_dir.mkdir(parents=True, exist_ok=True)
 
     known = {
-        DETECTOR_NAME, DENOISER_NAME,
+        DETECTOR_NAME,
+        DENOISER_NAME,
         *(f"{b}_extractor" for b in keras_onnx.INPUT_NAMES),
     }
     wanted = set(only) if only else None
@@ -47,8 +48,7 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
         unknown = wanted - known
         if unknown:
             raise ValueError(
-                f"Unknown model name(s) {sorted(unknown)}. "
-                f"Valid names: {sorted(known)}"
+                f"Unknown model name(s) {sorted(unknown)}. Valid names: {sorted(known)}"
             )
 
     def selected(name: str) -> bool:
@@ -60,13 +60,9 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
     # Filter BEFORE converting. Filtering the results still loaded both .keras
     # models into TensorFlow, traced them with tf2onnx and rewrote
     # artifacts/onnx/, even for `--only latest_net_G_B`.
-    wanted_extractors = [
-        b for b in keras_onnx.INPUT_NAMES if selected(f"{b}_extractor")
-    ]
+    wanted_extractors = [b for b in keras_onnx.INPUT_NAMES if selected(f"{b}_extractor")]
     exported.update(
-        keras_onnx.convert_extractors(
-            models_dir, onnx_dir, cfg, backbones=wanted_extractors
-        )
+        keras_onnx.convert_extractors(models_dir, onnx_dir, cfg, backbones=wanted_extractors)
     )
 
     # ── denoiser ──────────────────────────────────────────────────────────────
@@ -122,9 +118,9 @@ def build(cfg: Config, only: list[str] | None = None) -> dict[str, Path]:
         )
         logger.info("Staged %s -> %s", model_name, model_dir)
 
-    missing = {
-        DETECTOR_NAME, DENOISER_NAME, "resnet50_extractor", "vgg16_extractor"
-    } - set(exported)
+    missing = {DETECTOR_NAME, DENOISER_NAME, "resnet50_extractor", "vgg16_extractor"} - set(
+        exported
+    )
     if missing and only is None:
         logger.warning(
             "Model repository is incomplete: %s missing. Triton will fail to "

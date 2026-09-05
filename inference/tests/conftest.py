@@ -19,9 +19,9 @@ def rgb_image() -> Image.Image:
     mistakes show up as wrong numbers rather than as a plausible-looking image.
     """
     arr = np.zeros((120, 300, 3), dtype=np.uint8)
-    arr[:, :100] = (255, 0, 0)      # red
-    arr[:, 100:200] = (0, 255, 0)   # green
-    arr[:, 200:] = (0, 0, 255)      # blue
+    arr[:, :100] = (255, 0, 0)  # red
+    arr[:, 100:200] = (0, 255, 0)  # green
+    arr[:, 200:] = (0, 0, 255)  # blue
     return Image.fromarray(arr, "RGB")
 
 

@@ -27,9 +27,7 @@ def person_dirs(test_dir: Path) -> list[Path]:
     (Kaggle), plain `001/` once forgeries have been filtered out, or anything
     else. Folders ending in `_forg` are always excluded.
     """
-    all_dirs = sorted(
-        d for d in test_dir.iterdir() if d.is_dir() and not d.name.endswith("_forg")
-    )
+    all_dirs = sorted(d for d in test_dir.iterdir() if d.is_dir() and not d.name.endswith("_forg"))
     if not all_dirs:
         raise FileNotFoundError(
             f"No person subfolders in {test_dir}. paths.verification_dataset "

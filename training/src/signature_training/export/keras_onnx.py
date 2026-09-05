@@ -123,7 +123,7 @@ def convert_extractors(
 ) -> dict[str, Path]:
     """Convert whichever of the requested extractors exist in `models_dir`."""
     produced = {}
-    for backbone in (backbones if backbones is not None else list(INPUT_NAMES)):
+    for backbone in backbones if backbones is not None else list(INPUT_NAMES):
         input_name = INPUT_NAMES[backbone]
         src = models_dir / f"{backbone}_extractor.keras"
         if not src.is_file():

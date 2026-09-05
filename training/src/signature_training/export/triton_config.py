@@ -82,12 +82,7 @@ def generate(
     # configuration that was doing something.
     gpus = "\n    gpus: [ 0 ]" if instance_kind == "KIND_GPU" else ""
     parts.append(
-        "instance_group [\n"
-        "  {\n"
-        f"    kind: {instance_kind}{gpus}\n"
-        "    count: 1\n"
-        "  }\n"
-        "]\n"
+        f"instance_group [\n  {{\n    kind: {instance_kind}{gpus}\n    count: 1\n  }}\n]\n"
     )
     return "".join(parts)
 

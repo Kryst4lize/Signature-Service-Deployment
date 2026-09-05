@@ -67,17 +67,17 @@ class CycleGANTrainConfig:
 
 @dataclass
 class VerificationTrainConfig:
-    backbone: str = "both"          # vgg16 | resnet50 | both
+    backbone: str = "both"  # vgg16 | resnet50 | both
     image_size: int = 224
     batch_size: int = 32
     val_split: float = 0.15
-    phase1_epochs: int = 50         # frozen backbone, head only
-    phase2_epochs: int = 10         # full fine-tune
+    phase1_epochs: int = 50  # frozen backbone, head only
+    phase2_epochs: int = 10  # full fine-tune
     phase1_lr: float = 1e-3
     phase2_lr: float = 1e-4
     embedding_dim: int = 4096
     seed: int = 42
-    vgg16_weights: str = ""         # optional local .h5, else Keras downloads
+    vgg16_weights: str = ""  # optional local .h5, else Keras downloads
     resnet50_weights: str = ""
 
 
@@ -96,7 +96,7 @@ class ExportConfig:
     image_size: int = 224
     yolo_image_size: int = 640
     max_batch_size: int = 1
-    instance_kind: str = "KIND_GPU"   # KIND_GPU | KIND_CPU
+    instance_kind: str = "KIND_GPU"  # KIND_GPU | KIND_CPU
     simplify: bool = True
 
 

@@ -30,13 +30,15 @@ def corpus(tmp_path):
 
 @pytest.fixture
 def cfg(tmp_path, corpus):
-    return Config.load(overrides={
-        "paths.raw_signatures": str(corpus),
-        "paths.cyclegan_dataset": str(tmp_path / "processed" / "cyclegan"),
-        "paths.verification_dataset": str(tmp_path / "processed" / "verification"),
-        "paths.stamps": str(tmp_path / "no_stamps"),
-        "cyclegan_data.image_size": "64",
-    })
+    return Config.load(
+        overrides={
+            "paths.raw_signatures": str(corpus),
+            "paths.cyclegan_dataset": str(tmp_path / "processed" / "cyclegan"),
+            "paths.verification_dataset": str(tmp_path / "processed" / "verification"),
+            "paths.stamps": str(tmp_path / "no_stamps"),
+            "cyclegan_data.image_size": "64",
+        }
+    )
 
 
 def test_build_writes_paired_domains(cfg):
@@ -64,13 +66,17 @@ def test_noisy_domain_actually_differs_from_clean(cfg):
 
 def test_build_is_reproducible_under_a_fixed_seed(cfg, tmp_path):
     cyclegan.build(cfg)
-    first = {p.name: p.read_bytes()
-             for p in (cfg.paths.resolve("cyclegan_dataset") / "trainB").glob("*.png")}
+    first = {
+        p.name: p.read_bytes()
+        for p in (cfg.paths.resolve("cyclegan_dataset") / "trainB").glob("*.png")
+    }
 
     cfg.paths.cyclegan_dataset = str(tmp_path / "again")
     cyclegan.build(cfg)
-    second = {p.name: p.read_bytes()
-              for p in (cfg.paths.resolve("cyclegan_dataset") / "trainB").glob("*.png")}
+    second = {
+        p.name: p.read_bytes()
+        for p in (cfg.paths.resolve("cyclegan_dataset") / "trainB").glob("*.png")
+    }
 
     assert first.keys() == second.keys()
     assert first == second
@@ -111,6 +117,7 @@ def test_verification_split_excludes_forgeries(cfg):
 def _fake_embedder(dim=32):
     """Embedding determined by the person id, so same-person pairs are similar
     and different-person pairs are not."""
+
     def embed(path):
         person = path.parent.name.replace("_org", "")
         rng = np.random.default_rng(abs(hash(person)) % (2**31))
@@ -118,6 +125,7 @@ def _fake_embedder(dim=32):
         jitter = np.random.default_rng(abs(hash(path.name)) % (2**31)).normal(scale=0.05, size=dim)
         vec = base + jitter
         return vec / np.linalg.norm(vec)
+
     return embed
 
 
