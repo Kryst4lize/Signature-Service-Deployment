@@ -46,7 +46,6 @@ env:
   # set and turned the job red against an unchanged tree.
   UV_VERSION: "0.11.21"
   RUFF_VERSION: "0.14.5"
-  HADOLINT_VERSION: "2.12.0"
   # 0.58.1 could NOT parse uv.lock — it detected zero targets, so the CVE jobs
   # would have reported "no vulnerabilities" while scanning nothing at all.
   # uv.lock support landed later; verified that 0.70.0 finds both lockfiles.
@@ -93,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -141,7 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -277,7 +276,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -293,7 +292,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
