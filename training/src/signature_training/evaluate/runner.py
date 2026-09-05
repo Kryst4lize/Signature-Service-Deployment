@@ -81,8 +81,8 @@ def evaluate_one(cfg: Config, backbone: str, extractor_path: Path, test_dir: Pat
         "match_threshold_for_service": 1.0 - eer_threshold,
         "auc": float(roc_auc),
         "dprime": dprime,
-        "genuine_pairs": int(len(genuine)),
-        "impostor_pairs": int(len(impostor)),
+        "genuine_pairs": len(genuine),
+        "impostor_pairs": len(impostor),
         "resolvable_far": floor,
         "genuine_mean": float(genuine.mean()),
         "impostor_mean": float(impostor.mean()),
@@ -106,16 +106,17 @@ def _report(r: dict, tar: dict, fnmr: dict, genuine: np.ndarray, impostor: np.nd
         f"  d-prime          {r['dprime']:>8.4f}     higher is better (> 2.0 good)",
         f"  {sep}",
         f"  EER threshold    {r['eer_threshold']:>8.4f}     cosine SIMILARITY",
-        f"  -> set inference MATCH_THRESHOLD={r['match_threshold_for_service']:.4f}  (cosine DISTANCE)",
+        f"  -> set inference MATCH_THRESHOLD="
+        f"{r['match_threshold_for_service']:.4f}  (cosine DISTANCE)",
         f"  {sep}",
     ]
     for target in (0.05, 0.01, 0.001):
         note = "" if target >= r["resolvable_far"] else "  << below sample resolution"
-        lines.append(f"  TAR @ FAR {target*100:>5.1f}%  {tar[target][0]:>8.4f}{note}")
+        lines.append(f"  TAR @ FAR {target * 100:>5.1f}%  {tar[target][0]:>8.4f}{note}")
     lines.append(f"  {sep}")
     for target in (0.05, 0.01, 0.001):
         note = "" if target >= r["resolvable_far"] else "  << below sample resolution"
-        lines.append(f"  FNMR @ FMR {target*100:>4.1f}% {fnmr[target]:>8.4f}{note}")
+        lines.append(f"  FNMR @ FMR {target * 100:>4.1f}% {fnmr[target]:>8.4f}{note}")
     lines += [
         f"  {sep}",
         f"  Same person   μ={genuine.mean():.4f}  σ={genuine.std():.4f}",
@@ -126,7 +127,7 @@ def _report(r: dict, tar: dict, fnmr: dict, genuine: np.ndarray, impostor: np.nd
     if r["resolvable_far"] > 0.001:
         lines.append(
             f"  NOTE: {r['impostor_pairs']} impostor pairs resolve FAR only to "
-            f"{r['resolvable_far']*100:.3f}%. Raise "
+            f"{r['resolvable_far'] * 100:.3f}%. Raise "
             f"evaluate.impostor_pairs_per_couple for finer low-FAR readings."
         )
         lines.append(f"  {sep}")
@@ -137,9 +138,7 @@ def run(cfg: Config) -> list[dict]:
     models_dir = cfg.paths.resolve("models")
     test_dir = cfg.paths.resolve("verification_dataset") / "test"
     if not test_dir.is_dir():
-        raise FileNotFoundError(
-            f"{test_dir} not found. Run `sigtrain data-verification` first."
-        )
+        raise FileNotFoundError(f"{test_dir} not found. Run `sigtrain data-verification` first.")
 
     out_dir = cfg.paths.resolve("evaluation")
     out_dir.mkdir(parents=True, exist_ok=True)

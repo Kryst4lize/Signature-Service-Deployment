@@ -29,15 +29,25 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 NAMES = [
-    "Nguyễn Thị B", "Đỗ Văn C", "Phạm Văn D",
-    "Trần Mỹ Thoa", "Trịnh Thị Dung", "Tống Thành Tuấn",
-    "Amal Joseph", "Steve Jobs", "Larry Page",
-    "Katie Bouman", "Ada Lovelace",
+    "Nguyễn Thị B",
+    "Đỗ Văn C",
+    "Phạm Văn D",
+    "Trần Mỹ Thoa",
+    "Trịnh Thị Dung",
+    "Tống Thành Tuấn",
+    "Amal Joseph",
+    "Steve Jobs",
+    "Larry Page",
+    "Katie Bouman",
+    "Ada Lovelace",
 ]
 
 CAPTIONS = [
-    "(Ký, họ tên)", "(Ký, họ tên, đóng dấu)",
-    "Sincerely,", "Regards,", "Yours truly,",
+    "(Ký, họ tên)",
+    "(Ký, họ tên, đóng dấu)",
+    "Sincerely,",
+    "Regards,",
+    "Yours truly,",
 ]
 
 
@@ -93,9 +103,11 @@ class DocumentNoise:
             return image
 
         edge_margin = max(1, int(0.15 * width))
-        sides = ["left", "right"] if num_lines == 2 else [
-            "left" if self.rng.random() < 0.5 else "right"
-        ]
+        sides = (
+            ["left", "right"]
+            if num_lines == 2
+            else ["left" if self.rng.random() < 0.5 else "right"]
+        )
 
         for side in sides:
             thickness = int(self.rng.integers(1, 4))

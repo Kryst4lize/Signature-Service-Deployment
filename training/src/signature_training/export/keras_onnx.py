@@ -41,9 +41,9 @@ def convert(
     opset: int = 13,
     simplify_graph: bool = True,
 ) -> Path:
+    import onnx
     import tensorflow as tf
     import tf2onnx
-    import onnx
 
     keras_path, onnx_path = Path(keras_path), Path(onnx_path)
     if not keras_path.is_file():
@@ -98,7 +98,7 @@ def _simplify(proto):
 
     try:
         simplified = onnxslim.slim(proto)
-    except Exception as exc:  # noqa: BLE001 - simplification is best-effort
+    except Exception as exc:
         logger.warning("Simplification failed (%s) - keeping the original graph", exc)
         return proto
 
@@ -123,7 +123,7 @@ def convert_extractors(
 ) -> dict[str, Path]:
     """Convert whichever of the requested extractors exist in `models_dir`."""
     produced = {}
-    for backbone in (backbones if backbones is not None else list(INPUT_NAMES)):
+    for backbone in backbones if backbones is not None else list(INPUT_NAMES):
         input_name = INPUT_NAMES[backbone]
         src = models_dir / f"{backbone}_extractor.keras"
         if not src.is_file():

@@ -64,4 +64,6 @@ class Settings(BaseSettings):
         return f"{self.triton_host}:{self.triton_http_port}"
 
 
-settings = Settings()
+# pydantic-settings fills the required fields from the environment, which a
+# static checker cannot see.
+settings = Settings()  # ty: ignore[missing-argument]

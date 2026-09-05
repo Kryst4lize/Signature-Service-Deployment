@@ -1,4 +1,4 @@
-.PHONY: help up dev down logs test test-integration test-image clean
+.PHONY: help up dev down logs test test-integration test-image lint format typecheck check lock clean
 
 COMPOSE    := docker compose
 DEV        := -f docker-compose.yml -f docker-compose.dev.yml
@@ -20,6 +20,21 @@ down:                      ## stop everything (volumes preserved)
 
 logs:                      ## follow the api logs
 	$(COMPOSE) logs -f api
+
+lock:                      ## refresh api/uv.lock from api/pyproject.toml
+	uv lock --project api
+
+lint:                      ## ruff check
+	uv run --project api ruff check .
+
+format:                    ## ruff format
+	uv run --project api ruff format .
+
+typecheck:                 ## ty check
+	uv run --project api ty check api/app
+
+check: lint typecheck      ## lint + typecheck, no formatting changes
+	uv run --project api ruff format --check .
 
 test-image:                ## build the test runner image
 	docker build -q -t $(TEST_IMAGE) -f tests/Dockerfile .

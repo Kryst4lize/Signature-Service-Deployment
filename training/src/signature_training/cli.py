@@ -125,7 +125,7 @@ def stage_export(cfg: Config, args) -> None:
 
     produced = repository.build(cfg, only=getattr(args, "only", None))
     print(f"\nTriton model repository at {cfg.paths.resolve('triton_repository')}:")
-    for name, path in produced.items():
+    for name in produced:
         print(f"  {name}/1/model.onnx  +  config.pbtxt")
     print("\nStart the service with:  cd ../inference && docker compose up -d")
 
@@ -165,14 +165,18 @@ def build_parser() -> argparse.ArgumentParser:
     # The defaults are SUPPRESS so the subparser does not overwrite a value the
     # root already captured; real defaults are applied after parsing.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--config", default=argparse.SUPPRESS,
-                        help=f"YAML config (default: {DEFAULT_CONFIG.name})")
-    common.add_argument("--set", dest="overrides", action="append",
-                        default=argparse.SUPPRESS,
-                        metavar="section.field=value",
-                        help="Override a config value; repeatable")
-    common.add_argument("-v", "--verbose", action="store_true",
-                        default=argparse.SUPPRESS)
+    common.add_argument(
+        "--config", default=argparse.SUPPRESS, help=f"YAML config (default: {DEFAULT_CONFIG.name})"
+    )
+    common.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=argparse.SUPPRESS,
+        metavar="section.field=value",
+        help="Override a config value; repeatable",
+    )
+    common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS)
 
     parser = argparse.ArgumentParser(
         prog="sigtrain",
@@ -183,20 +187,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="stage", required=True)
     for name in STAGES:
-        sp = sub.add_parser(name, parents=[common],
-                            help=STAGES[name].__doc__ or name)
+        sp = sub.add_parser(name, parents=[common], help=STAGES[name].__doc__ or name)
         if name == "train-cyclegan":
-            sp.add_argument("--resume-epoch", type=int, default=None,
-                            help="Resume from this epoch (passes --continue_train)")
+            sp.add_argument(
+                "--resume-epoch",
+                type=int,
+                default=None,
+                help="Resume from this epoch (passes --continue_train)",
+            )
         if name == "export":
-            sp.add_argument("--only", nargs="+", default=None,
-                            metavar="MODEL", help="Export only these model names")
-            sp.add_argument("--output", default=None,
-                            help="Triton repository path (overrides the config)")
+            sp.add_argument(
+                "--only",
+                nargs="+",
+                default=None,
+                metavar="MODEL",
+                help="Export only these model names",
+            )
+            sp.add_argument(
+                "--output", default=None, help="Triton repository path (overrides the config)"
+            )
 
     sp_all = sub.add_parser("all", parents=[common], help="run every stage in order")
-    sp_all.add_argument("--skip", nargs="+", default=[], choices=STAGE_ORDER,
-                        help="Stages to skip")
+    sp_all.add_argument("--skip", nargs="+", default=[], choices=STAGE_ORDER, help="Stages to skip")
     sp_all.add_argument("--resume-epoch", type=int, default=None)
     sp_all.add_argument("--only", nargs="+", default=None)
     sp_all.add_argument("--output", default=None)

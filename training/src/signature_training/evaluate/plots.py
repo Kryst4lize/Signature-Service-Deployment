@@ -14,12 +14,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import matplotlib
+import matplotlib as mpl
 
-matplotlib.use("Agg")  # no display in a training container
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from scipy.special import ndtri  # noqa: E402
+mpl.use("Agg")  # no display in a training container
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.special import ndtri
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,24 @@ def _save(fig, path: Path) -> None:
 
 
 def score_distribution(genuine, impostor, name: str, out_dir: Path) -> None:
-    bins = np.linspace(
-        min(genuine.min(), impostor.min()), max(genuine.max(), impostor.max()), 60
-    )
+    bins = np.linspace(min(genuine.min(), impostor.min()), max(genuine.max(), impostor.max()), 60)
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.hist(genuine, bins=bins, alpha=0.65, color=GENUINE_C, density=True,
-            label=f"Same person  μ={genuine.mean():.3f}")
-    ax.hist(impostor, bins=bins, alpha=0.65, color=IMPOSTOR_C, density=True,
-            label=f"Diff person  μ={impostor.mean():.3f}")
+    ax.hist(
+        genuine,
+        bins=bins,
+        alpha=0.65,
+        color=GENUINE_C,
+        density=True,
+        label=f"Same person  μ={genuine.mean():.3f}",
+    )
+    ax.hist(
+        impostor,
+        bins=bins,
+        alpha=0.65,
+        color=IMPOSTOR_C,
+        density=True,
+        label=f"Diff person  μ={impostor.mean():.3f}",
+    )
     ax.set_xlabel("Cosine similarity")
     ax.set_ylabel("Density")
     ax.set_title(f"{name} — score distribution")
@@ -71,9 +81,9 @@ def det(fpr, tpr, name: str, out_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot(ndtri(fpr_c), ndtri(fnr_c), color=DET_C, lw=2)
     ax.set_xticks([ndtri(t) for t in ticks])
-    ax.set_xticklabels([f"{t*100:.1f}%" for t in ticks], fontsize=7)
+    ax.set_xticklabels([f"{t * 100:.1f}%" for t in ticks], fontsize=7)
     ax.set_yticks([ndtri(t) for t in ticks])
-    ax.set_yticklabels([f"{t*100:.1f}%" for t in ticks], fontsize=7)
+    ax.set_yticklabels([f"{t * 100:.1f}%" for t in ticks], fontsize=7)
     ax.set_xlabel("FMR (false match rate)")
     ax.set_ylabel("FNMR (false non-match rate)")
     ax.set_title(f"{name} — DET")
@@ -97,19 +107,28 @@ def threshold_sweep(fpr, tpr, thresholds, name: str, out_dir: Path) -> None:
 
 def comparison(results: list[dict], out_dir: Path) -> None:
     """Side-by-side bars for the headline metrics of each backbone."""
-    metrics = [("EER ↓", "eer"), ("AUC-ROC ↑", "auc"),
-               ("d-prime ↑", "dprime"), ("Score gap ↑", "gap")]
+    metrics = [
+        ("EER ↓", "eer"),
+        ("AUC-ROC ↑", "auc"),
+        ("d-prime ↑", "dprime"),
+        ("Score gap ↑", "gap"),
+    ]
     names = [r["name"] for r in results]
     colors = [ROC_C, IMPOSTOR_C]
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(14, 4))
-    for ax, (title, key) in zip(axes, metrics):
+    for ax, (title, key) in zip(axes, metrics, strict=True):
         vals = [r[key] for r in results]
         bars = ax.bar(names, vals, color=colors[: len(names)])
-        for bar, v in zip(bars, vals):
-            ax.text(bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + max(vals) * 0.02,
-                    f"{v:.4f}", ha="center", va="bottom", fontsize=9)
+        for bar, v in zip(bars, vals, strict=True):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + max(vals) * 0.02,
+                f"{v:.4f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
         ax.set_title(title)
         ax.set_ylim(0, max(vals) * 1.30 if max(vals) > 0 else 1)
         ax.grid(axis="y", alpha=0.3)

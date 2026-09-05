@@ -48,7 +48,7 @@ def load_pages(data: bytes, filename: str, max_pages: int) -> list[Image.Image]:
 
 def pil_to_tensor(img: Image.Image, size: tuple[int, int]) -> np.ndarray:
     """PIL RGB -> [1, 3, H, W] float32 in [0, 1]."""
-    arr = np.asarray(img.resize(size, Image.LANCZOS), dtype=np.float32) / 255.0
+    arr = np.asarray(img.resize(size, Image.Resampling.LANCZOS), dtype=np.float32) / 255.0
     return arr.transpose(2, 0, 1)[np.newaxis]
 
 

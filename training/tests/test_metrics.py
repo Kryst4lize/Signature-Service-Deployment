@@ -69,8 +69,8 @@ def test_resolvable_far_reflects_the_impostor_count():
     """210 impostor pairs — what one-pair-per-couple gives on the 21-person
     test split — cannot express a 0.1% FAR at all."""
     assert metrics.resolvable_far(210) == pytest.approx(1 / 210)
-    assert metrics.resolvable_far(210) > 0.001      # 0.1% unresolvable
-    assert metrics.resolvable_far(5000) < 0.001     # resolvable
+    assert metrics.resolvable_far(210) > 0.001  # 0.1% unresolvable
+    assert metrics.resolvable_far(5000) < 0.001  # resolvable
     assert metrics.resolvable_far(0) == 1.0
 
 

@@ -148,9 +148,9 @@ See [`../training/data/README.md`](../training/data/README.md).
 
 ### `FileNotFoundError: Caption font not found`
 
-`assets/times.ttf` is missing from the install. In a container this usually
-means the package was installed without package data; reinstall with
-`pip install -e .` from `training/`.
+`assets/times.ttf` is missing from the install. `uv sync` installs the project
+editable, so `paths.py` resolves assets relative to the source tree; if you
+installed a built wheel instead, run `uv sync` from `training/`.
 
 This used to fail differently and much worse: the font was loaded from a path
 relative to the working directory, the resulting `OSError` was swallowed
@@ -170,12 +170,19 @@ FileNotFoundError: .../data/processed/cyclegan/trainA not found
 Run `sigtrain data-cyclegan` first. If the repo itself is missing, `sigtrain
 setup` clones it.
 
-### `pip install -r requirements.txt` fails on `triton==2.3.0`
+### `uv sync --frozen` fails with "the lockfile is not up to date"
 
-Fixed in v2.0.0. That pin was openai/triton, the GPU kernel DSL — unrelated to
-Triton Inference Server. It publishes only manylinux x86_64 wheels, so the
-install failed outright on macOS, aarch64 and Python 3.12+. torch declares it
-already, correctly guarded by platform markers.
+`pyproject.toml` was edited without re-locking. Run `make lock` (i.e.
+`uv lock`) and commit the updated `uv.lock`. The image builds use `--frozen`
+deliberately: a silent re-resolve during a build is how a deployment ends up
+running versions nobody chose.
+
+### Dependency install fails on `triton==2.3.0`
+
+Fixed in v2.0.0, before the uv migration. That pin was openai/triton, the GPU
+kernel DSL — unrelated to Triton Inference Server. It publishes only manylinux
+x86_64 wheels, so the install failed outright on macOS, aarch64 and Python
+3.12+. torch declares it already, correctly guarded by platform markers.
 
 ### `ModuleNotFoundError: No module named 'onnxslim'`
 

@@ -58,7 +58,7 @@ def export(
             # `max_batch_size: 1` Triton requires dim 0 to be dynamic. The
             # spatial dims stay fixed at imgsz; only the batch axis varies.
             dynamic=True,
-            nms=False,       # the client picks the top box itself
+            nms=False,  # the client picks the top box itself
         )
     )
 

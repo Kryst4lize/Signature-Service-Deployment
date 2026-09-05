@@ -36,17 +36,22 @@ def export(
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     if not (repo_path / "models" / "networks.py").is_file():
-        raise FileNotFoundError(
-            f"CycleGAN repo not found at {repo_path}. Run `sigtrain setup`."
-        )
+        raise FileNotFoundError(f"CycleGAN repo not found at {repo_path}. Run `sigtrain setup`.")
 
     sys.path.insert(0, str(repo_path))
-    from models.networks import define_G
+    # Resolved at runtime from the CycleGAN repo just added to sys.path; it is
+    # cloned, not a declared dependency.
+    from models.networks import define_G  # ty: ignore[unresolved-import]
 
     net = define_G(
-        input_nc=3, output_nc=3, ngf=64,
-        netG="resnet_9blocks", norm="instance",
-        use_dropout=False, init_type="normal", init_gain=0.02,
+        input_nc=3,
+        output_nc=3,
+        ngf=64,
+        netG="resnet_9blocks",
+        norm="instance",
+        use_dropout=False,
+        init_type="normal",
+        init_gain=0.02,
         gpu_ids=[],
     )
 

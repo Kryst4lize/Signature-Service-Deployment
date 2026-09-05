@@ -42,21 +42,37 @@ def ensure_repo(cfg: Config) -> Path:
 def build_command(cfg: Config, repo: Path, resume_epoch: int | None = None) -> list[str]:
     t = cfg.cyclegan_train
     cmd = [
-        sys.executable, "train.py",
-        "--dataroot", str(cfg.paths.resolve("cyclegan_dataset")),
-        "--checkpoints_dir", str(cfg.paths.resolve("cyclegan_checkpoints")),
-        "--name", t.name,
-        "--model", "cycle_gan",
-        "--norm", t.norm,
-        "--load_size", str(t.load_size),
-        "--crop_size", str(t.crop_size),
-        "--n_epochs", str(t.n_epochs),
-        "--n_epochs_decay", str(t.n_epochs_decay),
-        "--gpu_ids", t.gpu_ids,
+        sys.executable,
+        "train.py",
+        "--dataroot",
+        str(cfg.paths.resolve("cyclegan_dataset")),
+        "--checkpoints_dir",
+        str(cfg.paths.resolve("cyclegan_checkpoints")),
+        "--name",
+        t.name,
+        "--model",
+        "cycle_gan",
+        "--norm",
+        t.norm,
+        "--load_size",
+        str(t.load_size),
+        "--crop_size",
+        str(t.crop_size),
+        "--n_epochs",
+        str(t.n_epochs),
+        "--n_epochs_decay",
+        str(t.n_epochs_decay),
+        "--gpu_ids",
+        t.gpu_ids,
     ]
     if resume_epoch is not None:
-        cmd += ["--continue_train", "--epoch", str(resume_epoch),
-                "--epoch_count", str(resume_epoch + 1)]
+        cmd += [
+            "--continue_train",
+            "--epoch",
+            str(resume_epoch),
+            "--epoch_count",
+            str(resume_epoch + 1),
+        ]
     cmd += list(t.extra_args)
     return cmd
 
@@ -67,9 +83,7 @@ def run(cfg: Config, resume_epoch: int | None = None) -> Path:
 
     dataroot = cfg.paths.resolve("cyclegan_dataset")
     if not (dataroot / "trainA").is_dir():
-        raise FileNotFoundError(
-            f"{dataroot}/trainA not found. Run `sigtrain data-cyclegan` first."
-        )
+        raise FileNotFoundError(f"{dataroot}/trainA not found. Run `sigtrain data-cyclegan` first.")
 
     cmd = build_command(cfg, repo, resume_epoch)
     logger.info("Running: %s", " ".join(cmd))

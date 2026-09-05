@@ -21,7 +21,6 @@ Two behavioural fixes over the original dataset_preparation.py:
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import cv2
@@ -49,7 +48,7 @@ def make_square(img: Image.Image, target: int) -> Image.Image:
     size = max(target, w, h)
     canvas = Image.new("RGB", (size, size), (255, 255, 255))
     canvas.paste(img, ((size - w) // 2, (size - h) // 2))
-    return canvas.resize((target, target), Image.LANCZOS)
+    return canvas.resize((target, target), Image.Resampling.LANCZOS)
 
 
 def build(cfg: Config) -> dict[str, int]:
@@ -83,7 +82,8 @@ def build(cfg: Config) -> dict[str, int]:
     if not stamper._stamps:
         logger.warning(
             "No stamp images in %s - stamp noise disabled. The denoiser will "
-            "not learn to remove seals.", stamps_dir
+            "not learn to remove seals.",
+            stamps_dir,
         )
 
     dirs = {
@@ -106,7 +106,7 @@ def build(cfg: Config) -> dict[str, int]:
         for path in tqdm(items, desc=f"  {split}", unit="img"):
             try:
                 clean, noisy = _make_pair(path, document, stamper, data_cfg.image_size)
-            except Exception as exc:  # noqa: BLE001 - collected and reported below
+            except Exception as exc:
                 failures.append((path, str(exc)))
                 continue
             stem = path.stem
@@ -130,7 +130,10 @@ def build(cfg: Config) -> dict[str, int]:
 
     logger.info(
         "Wrote %d train pairs and %d test pairs to %s (%d failed)",
-        written["train"], written["test"], dst, len(failures),
+        written["train"],
+        written["test"],
+        dst,
+        len(failures),
     )
     return {**written, "failed": len(failures)}
 
@@ -186,7 +189,10 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
         counts[split] = copied + existing
         logger.info(
             "%s: %d genuine folder(s) (%d copied, %d already present)",
-            split, counts[split], copied, existing,
+            split,
+            counts[split],
+            copied,
+            existing,
         )
 
     if not any(counts.values()):

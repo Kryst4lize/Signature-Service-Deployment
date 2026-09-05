@@ -144,6 +144,32 @@ cd training  && make test               # ~1s, no GPU, no TF/torch
 cd inference && make test-integration   # spins up a throwaway pgvector
 ```
 
+## Toolchain
+
+Both halves use Astral's toolchain, pinned in each project's `dev` dependency
+group so everyone runs the same versions:
+
+| Tool | Role |
+|---|---|
+| [uv](https://docs.astral.sh/uv/) | Dependencies, lockfile, interpreter, and the Docker installs |
+| [ruff](https://docs.astral.sh/ruff/) | Lint and format — configured once in [`ruff.toml`](ruff.toml) for the whole repo |
+| [ty](https://docs.astral.sh/ty/) | Type checking |
+
+```bash
+make check   # lint + format-check + typecheck, in either half
+make lock    # re-resolve uv.lock after editing pyproject.toml
+```
+
+`uv.lock` is committed and authoritative. Both images build with
+`uv sync --frozen`, which fails rather than re-resolving, so a deployment
+cannot end up running versions nobody chose.
+
+If you use `git blame`, opt into the formatting-commit skip list once:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ---
 
 ## License

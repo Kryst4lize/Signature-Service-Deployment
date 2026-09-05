@@ -56,9 +56,7 @@ def _generators(cfg: Config, backbone: str):
     a class mapping."""
     train_dir = cfg.paths.resolve("verification_dataset") / "train"
     if not train_dir.is_dir():
-        raise FileNotFoundError(
-            f"{train_dir} not found. Run `sigtrain data-verification` first."
-        )
+        raise FileNotFoundError(f"{train_dir} not found. Run `sigtrain data-verification` first.")
 
     filtered = _genuine_only(train_dir)
     v = cfg.verification
@@ -70,25 +68,27 @@ def _generators(cfg: Config, backbone: str):
         height_shift_range=0.10,
         shear_range=0.05,
         zoom_range=0.08,
-        horizontal_flip=False,       # signatures are not mirror-symmetric
+        horizontal_flip=False,  # signatures are not mirror-symmetric
         fill_mode="constant",
-        cval=_WHITE_AFTER_CAFFE,     # see the note above
+        cval=_WHITE_AFTER_CAFFE,  # see the note above
         validation_split=v.val_split,
     )
-    common = dict(
-        directory=str(filtered),
-        target_size=(v.image_size, v.image_size),
-        color_mode="rgb",
-        batch_size=v.batch_size,
-        class_mode="categorical",
-        seed=v.seed,
-    )
+    common = {
+        "directory": str(filtered),
+        "target_size": (v.image_size, v.image_size),
+        "color_mode": "rgb",
+        "batch_size": v.batch_size,
+        "class_mode": "categorical",
+        "seed": v.seed,
+    }
     train_gen = aug.flow_from_directory(**common, shuffle=True, subset="training")
     val_gen = aug.flow_from_directory(**common, shuffle=False, subset="validation")
 
     logger.info(
         "%d persons | train %d | val %d",
-        train_gen.num_classes, train_gen.samples, val_gen.samples,
+        train_gen.num_classes,
+        train_gen.samples,
+        val_gen.samples,
     )
     return train_gen, val_gen, train_gen.num_classes, filtered
 
@@ -115,7 +115,9 @@ def _callbacks(name: str, ckpt_dir: Path) -> list:
         ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=4, min_lr=1e-6, verbose=1),
         ModelCheckpoint(
             filepath=str(ckpt_dir / f"{name}_best.keras"),
-            monitor="val_accuracy", save_best_only=True, verbose=1,
+            monitor="val_accuracy",
+            save_best_only=True,
+            verbose=1,
         ),
         TensorBoard(log_dir=str(ckpt_dir / "logs" / name)),
     ]

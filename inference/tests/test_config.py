@@ -10,12 +10,12 @@ import pytest
 
 from app.config import Settings
 
-BASE = dict(
-    postgres_host="h",
-    postgres_db="d",
-    postgres_user="u",
-    postgres_password="p",
-)
+BASE = {
+    "postgres_host": "h",
+    "postgres_db": "d",
+    "postgres_user": "u",
+    "postgres_password": "p",
+}
 
 
 def _settings(**kw) -> Settings:

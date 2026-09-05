@@ -8,9 +8,9 @@ os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("TRITON_HOST", "localhost")
 
-import numpy as np  # noqa: E402
-import pytest  # noqa: E402
-from PIL import Image  # noqa: E402
+import numpy as np
+import pytest
+from PIL import Image
 
 
 @pytest.fixture
@@ -19,9 +19,9 @@ def rgb_image() -> Image.Image:
     mistakes show up as wrong numbers rather than as a plausible-looking image.
     """
     arr = np.zeros((120, 300, 3), dtype=np.uint8)
-    arr[:, :100] = (255, 0, 0)      # red
-    arr[:, 100:200] = (0, 255, 0)   # green
-    arr[:, 200:] = (0, 0, 255)      # blue
+    arr[:, :100] = (255, 0, 0)  # red
+    arr[:, 100:200] = (0, 255, 0)  # green
+    arr[:, 200:] = (0, 0, 255)  # blue
     return Image.fromarray(arr, "RGB")
 
 

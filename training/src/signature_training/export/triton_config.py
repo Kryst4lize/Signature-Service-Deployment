@@ -33,10 +33,11 @@ def _tensor_specs(tensors) -> list[tuple[str, str, list[int]]]:
     specs = []
     for tensor in tensors:
         dtype = _ONNX_TYPE_TO_TRITON.get(tensor.type.tensor_type.elem_type, "TYPE_FP32")
-        dims = []
         # Skip the batch dimension; Triton supplies it implicitly.
-        for dim in list(tensor.type.tensor_type.shape.dim)[1:]:
-            dims.append(dim.dim_value if dim.dim_value > 0 else -1)
+        dims = [
+            dim.dim_value if dim.dim_value > 0 else -1
+            for dim in list(tensor.type.tensor_type.shape.dim)[1:]
+        ]
         specs.append((tensor.name, dtype, dims))
     return specs
 
@@ -81,12 +82,7 @@ def generate(
     # configuration that was doing something.
     gpus = "\n    gpus: [ 0 ]" if instance_kind == "KIND_GPU" else ""
     parts.append(
-        "instance_group [\n"
-        "  {\n"
-        f"    kind: {instance_kind}{gpus}\n"
-        "    count: 1\n"
-        "  }\n"
-        "]\n"
+        f"instance_group [\n  {{\n    kind: {instance_kind}{gpus}\n    count: 1\n  }}\n]\n"
     )
     return "".join(parts)
 
