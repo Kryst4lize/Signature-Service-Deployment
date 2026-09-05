@@ -28,12 +28,12 @@ RUN uv venv /opt/venv \
         numpy==1.26.4 \
         scipy==1.14.1 \
         scikit-learn==1.5.2 \
-        pillow==11.0.0 \
+        pillow==12.3.0 \
         opencv-python-headless==4.10.0.84 \
         matplotlib==3.9.3 \
         tqdm==4.67.1 \
         PyYAML==6.0.2 \
-        onnx==1.17.0 \
+        onnx==1.22.0 \
         pytest==8.3.4
 
 ENV PYTHONPATH=/w/src
