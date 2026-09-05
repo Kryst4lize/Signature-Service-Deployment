@@ -1,0 +1,24 @@
+# The previous version excluded *.py, *.md and *.ini, so the build context
+# contained no source at all — the image could never have carried the pipeline
+# it was supposed to run.
+#
+# Exclude only what is large or machine-local.
+
+data/
+artifacts/
+external/
+wheels/*.whl.tmp
+
+.git/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Machine-local mirror config: copied in explicitly via a bracket glob when
+# USE_INTERNAL_APT=1, never baked in by accident.
+.env

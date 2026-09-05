@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signature-training"
+version = "2.0.0"
+description = "Training pipeline for the signature detection, denoising and verification system"
+requires-python = ">=3.10"
+readme = "README.md"
+# No `license` key. `{ file = "../LICENSE" }` escapes the project root, and
+# setuptools' expand.read_files() refuses that with
+#   DistutilsOptionError: Cannot access '.../training/../LICENSE'
+# (setuptools 59 in the current image tolerates it; newer versions do not).
+# The repository LICENSE (Apache-2.0) governs; it is not duplicated here.
+
+# Runtime dependencies live in requirements.txt, which is what the Docker image
+# installs. They are intentionally not duplicated here: the deep-learning stack
+# needs exact pins chosen against a specific CUDA base image, which is a
+# deployment concern rather than a library-compatibility range.
+dependencies = []
+
+[project.scripts]
+sigtrain = "signature_training.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.ttf"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]
