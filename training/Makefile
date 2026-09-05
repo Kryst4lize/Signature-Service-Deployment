@@ -2,6 +2,8 @@
 
 COMPOSE    := docker compose
 TEST_IMAGE := signature-training-test
+# Extra pytest flags, e.g. PYTEST_ARGS='--junitxml=report.xml'
+PYTEST_ARGS ?=
 
 help:                  ## show this help
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | expand -t18
@@ -40,7 +42,8 @@ test-image:            ## build the lightweight test runner
 	docker build -q -t $(TEST_IMAGE) -f tests/Dockerfile .
 
 test: test-image       ## run the test suite (no GPU, no TF/torch)
-	docker run --rm -v "$(CURDIR):/w" $(TEST_IMAGE) python -m pytest tests/ -q
+	docker run --rm -v "$(CURDIR):/w" $(TEST_IMAGE) \
+	  python -m pytest tests/ -q $(PYTEST_ARGS)
 
 pipeline: up           ## run every stage end to end inside the container
 	$(COMPOSE) exec training sigtrain all

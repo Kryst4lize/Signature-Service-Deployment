@@ -84,8 +84,10 @@ USER appuser
 
 EXPOSE 8080
 
+# Exec form: no shell per probe. `curl -sf` already exits non-zero on a
+# connection failure (7) or an HTTP >= 400 (22), which is all HEALTHCHECK needs.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD curl -sf http://localhost:8080/health || exit 1
+    CMD ["curl", "-sf", "http://localhost:8080/health"]
 
 # No --reload here. uvicorn's Config.should_reload wins over --workers, so the
 # previous `--workers 2 --reload` silently ran a single-process reloader in
