@@ -49,6 +49,9 @@ htmlcov/
 # ── Notebooks ─────────────────────────────────────────────────────────────────
 .ipynb_checkpoints
 
+# CI test reports (--junitxml), uploaded as artifacts rather than committed.
+report.xml
+
 # ── Temporary ─────────────────────────────────────────────────────────────────
 *.tmp
 *.log

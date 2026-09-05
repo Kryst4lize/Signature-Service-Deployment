@@ -47,7 +47,10 @@ env:
   UV_VERSION: "0.11.21"
   RUFF_VERSION: "0.14.5"
   HADOLINT_VERSION: "2.12.0"
-  TRIVY_VERSION: "0.58.1"
+  # 0.58.1 could NOT parse uv.lock — it detected zero targets, so the CVE jobs
+  # would have reported "no vulnerabilities" while scanning nothing at all.
+  # uv.lock support landed later; verified that 0.70.0 finds both lockfiles.
+  TRIVY_VERSION: "v0.70.0"
 
 jobs:
   # ══ verify ══════════════════════════════════════════════════════════════════
@@ -59,7 +62,7 @@ jobs:
     name: verify / release-ref
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -88,9 +91,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [verify-release-ref]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -115,10 +118,10 @@ jobs:
           - training/Dockerfile
           - training/tests/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: hadolint ${{ matrix.dockerfile }}
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: ${{ matrix.dockerfile }}
           failure-threshold: warning
@@ -136,9 +139,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [verify-release-ref]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -167,13 +170,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint-python, lint-docker, lint-lockfiles]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: make test
         working-directory: training
         run: make test PYTEST_ARGS="--junitxml=/w/report.xml"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-training
@@ -185,7 +188,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint-python, lint-docker, lint-lockfiles]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Spins up its own pgvector container and tears it down, so the endpoint
       # tests run against the real schema — the pgvector cast, the cosine
@@ -194,7 +197,7 @@ jobs:
         working-directory: inference
         run: make test-integration PYTEST_ARGS="--junitxml=/w/report.xml"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-inference
@@ -210,12 +213,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test-training, test-inference]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build the API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: inference/api
           push: false
@@ -229,7 +232,7 @@ jobs:
       - name: Export the image for scanning
         run: docker save signature-inference-api:${{ github.sha }} -o /tmp/api-image.tar
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: api-image
           path: /tmp/api-image.tar
@@ -245,7 +248,7 @@ jobs:
     # informative — the API image already proves the uv install path works.
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ~9 GB of preinstalled toolchains this build does not use.
       - name: Reclaim runner disk
@@ -254,10 +257,10 @@ jobs:
                       /opt/hostedtoolcache/CodeQL
           df -h /
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build the training image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: training
           push: false
@@ -272,9 +275,9 @@ jobs:
     name: static-analysis / ty (inference)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -288,9 +291,9 @@ jobs:
     name: static-analysis / ty (training)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -310,15 +313,15 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: python
           # Both halves are pure Python; no build step to observe.
           build-mode: none
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: /language:python
 
@@ -326,6 +329,12 @@ jobs:
   # `continue-on-error` mirrors ClawRT's `allow_failure: true` on its scan jobs:
   # a new CVE disclosed upstream must not turn an unrelated pull request red.
   # Findings still surface in the run summary and in code scanning.
+  # Currently reports 19 HIGH (inference) and 18 HIGH + 1 CRITICAL (training)
+  # against the committed lockfiles — pillow, python-multipart, starlette, onnx,
+  # and torch 2.3.0 (CVE-2025-32434, the `torch.load` RCE, fixed in 2.6.0).
+  # Deliberately NOT fixed here: bumping torch and starlette across a major is a
+  # change that needs its own verification pass, not a drive-by in a CI PR.
+  # The findings land in code scanning so they are tracked rather than lost.
   security-source-cve-scan:
     name: security / source cve scan
     runs-on: ubuntu-latest
@@ -334,11 +343,12 @@ jobs:
       security-events: write
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: ${{ env.TRIVY_VERSION }}
           scan-type: fs
           scan-ref: .
           scanners: vuln
@@ -347,7 +357,7 @@ jobs:
           output: trivy-fs.sarif
           exit-code: "0"
 
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         continue-on-error: true
         with:
@@ -360,7 +370,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -369,8 +379,9 @@ jobs:
       # backlog item. This repo has had two tokens pasted into it in the past,
       # so the gate earns its place.
       - name: Trivy secret scan
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: ${{ env.TRIVY_VERSION }}
           scan-type: fs
           scan-ref: .
           scanners: secret
@@ -387,7 +398,7 @@ jobs:
       security-events: write
     continue-on-error: true
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: api-image
           path: /tmp
@@ -396,8 +407,9 @@ jobs:
         run: docker load -i /tmp/api-image.tar
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: ${{ env.TRIVY_VERSION }}
           scan-type: image
           image-ref: signature-inference-api:${{ github.sha }}
           severity: HIGH,CRITICAL
@@ -405,7 +417,7 @@ jobs:
           output: trivy-image.sarif
           exit-code: "0"
 
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         continue-on-error: true
         with:
