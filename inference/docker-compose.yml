@@ -1,0 +1,104 @@
+services:
+
+  # ── PostgreSQL + pgvector ───────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: sig_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env - see .env.example}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Triton Inference Server ─────────────────────────────────────────────────
+  # Place model weights at triton/model_repository/<model>/1/model.onnx before
+  # starting; Triton exits if a model directory has no version subdirectory.
+  # `training/` produces them: `sigtrain export --output ../inference/triton/model_repository`
+  triton:
+    image: ${TRITON_IMAGE:-nvcr.io/nvidia/tritonserver:24.01-py3}
+    container_name: sig_triton
+    restart: unless-stopped
+    command: tritonserver --model-repository=/models --strict-model-config=false
+    volumes:
+      - ./triton/model_repository:/models:ro
+    ports:
+      - "8010:8000"
+      - "8011:8001"
+      - "8012:8002"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/v2/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── FastAPI service ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      args:
+        API_BASE_IMAGE: ${API_BASE_IMAGE:-python:3.11-slim-bookworm}
+        USE_INTERNAL_APT: ${USE_INTERNAL_APT:-0}
+    container_name: sig_api
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TRITON_HOST: triton
+      TRITON_HTTP_PORT: 8000
+      APP_ENV: ${APP_ENV:-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      MATCH_THRESHOLD: ${MATCH_THRESHOLD:-0.30}
+      DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.5}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-20}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      triton:
+        condition: service_healthy
+
+  # ── Frontend (nginx) ────────────────────────────────────────────────────────
+  frontend:
+    image: nginx:alpine
+    container_name: sig_frontend
+    restart: unless-stopped
+    ports:
+      - "8110:80"
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  postgres_data:
