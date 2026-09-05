@@ -14,7 +14,7 @@
 *.jpeg
 *.png
 *.pdf
-!docs/**/*.png
+!documentation/**/*.png
 
 # ── Secrets & machine-local config ────────────────────────────────────────────
 # Real .env files never get committed; the *.example templates always do.
