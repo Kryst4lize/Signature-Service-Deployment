@@ -77,7 +77,7 @@ def _preview(img: Image.Image) -> tuple[Image.Image, float]:
     scale = PREVIEW_MAX_EDGE / longest
     resized = img.resize(
         (max(1, round(img.width * scale)), max(1, round(img.height * scale))),
-        Image.LANCZOS,
+        Image.Resampling.LANCZOS,
     )
     return resized, scale
 

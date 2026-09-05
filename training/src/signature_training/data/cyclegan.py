@@ -48,7 +48,7 @@ def make_square(img: Image.Image, target: int) -> Image.Image:
     size = max(target, w, h)
     canvas = Image.new("RGB", (size, size), (255, 255, 255))
     canvas.paste(img, ((size - w) // 2, (size - h) // 2))
-    return canvas.resize((target, target), Image.LANCZOS)
+    return canvas.resize((target, target), Image.Resampling.LANCZOS)
 
 
 def build(cfg: Config) -> dict[str, int]:

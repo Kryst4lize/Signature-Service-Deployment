@@ -41,7 +41,9 @@ def export(
         )
 
     sys.path.insert(0, str(repo_path))
-    from models.networks import define_G
+    # Resolved at runtime from the CycleGAN repo just added to sys.path; it is
+    # cloned, not a declared dependency.
+    from models.networks import define_G  # ty: ignore[unresolved-import]
 
     net = define_G(
         input_nc=3, output_nc=3, ngf=64,

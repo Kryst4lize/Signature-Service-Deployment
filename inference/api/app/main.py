@@ -34,7 +34,9 @@ app = FastAPI(
 origins = settings.cors_origin_list
 if origins:
     app.add_middleware(
-        CORSMiddleware,
+        # starlette types this parameter as _MiddlewareFactory[P], which its
+        # own middleware classes do not satisfy.
+        CORSMiddleware,  # ty: ignore[invalid-argument-type]
         allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
