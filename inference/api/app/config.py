@@ -31,6 +31,20 @@ class Settings(BaseSettings):
     # YOLOv8 objectness below this is treated as "no signature on this page".
     detection_confidence: float = 0.5
 
+    # Approximate nearest-neighbour candidate count.
+    #
+    # 0 (default) = exact sequential scan over every enrolled signature.
+    # > 0         = retrieve this many candidates from the HNSW index over
+    #               binary-quantized embeddings, then re-rank them exactly.
+    #
+    # The re-rank means the distance compared against match_threshold is always
+    # exact; only the candidate set is approximate. Measured at 4,800 rows:
+    # exact 18.5 ms vs 0.5 ms at 100 candidates, recall@1 97.5-100% on synthetic
+    # data. Left off by default because a missed true neighbour is a false
+    # REJECTION here — validate recall on your own enrolled set before enabling.
+    # See documentation/04-database.md.
+    ann_candidates: int = 0
+
     # ── Upload limits ─────────────────────────────────────────────────────────
     max_upload_bytes: int = 20 * 1024 * 1024
     max_pdf_pages: int = 20

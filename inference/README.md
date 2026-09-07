@@ -305,14 +305,45 @@ TRUNCATE items RESTART IDENTITY;
 
 then re-register every signature.
 
-### There is no ANN index, deliberately
+### Schema changes go through alembic
 
-pgvector caps HNSW and IVFFlat at 2000 dimensions; these columns are 4096-d.
-The previous `CREATE INDEX ... USING hnsw` did not build a slow index — it
-aborted initialisation and took the whole container down with it. Search is an
-exact sequential scan, ~80 ms at 5,000 registrations, against a request that
-already spends far longer in four GPU inferences. `postgres/init.sql` documents
-the escalation options if enrolment outgrows that.
+`postgres/init.sql` no longer owns the schema — it only creates the extension.
+The Postgres entrypoint runs init scripts **only when PGDATA is empty**, so
+anything defined there stops applying the moment a volume exists, which makes
+it useless for a schema that changes.
+
+```bash
+# applied automatically by the `migrate` service before the api starts
+docker compose run --rm migrate alembic upgrade head
+docker compose run --rm migrate alembic current
+docker compose run --rm migrate alembic history
+
+# after editing app/db.py
+docker compose run --rm migrate alembic revision --autogenerate -m "add a column"
+```
+
+`migrate` is a one-shot service and `api` waits on
+`service_completed_successfully`, so a failed migration stops the api starting
+rather than letting two uvicorn workers race the same DDL.
+
+**Adopting this on a database that already has the old init.sql schema:**
+
+```bash
+docker compose run --rm migrate alembic stamp 0001   # already at 0001; do not re-run it
+docker compose run --rm migrate alembic upgrade head # applies 0002 onward
+```
+
+### Vector indexing
+
+There *is* one, as of migration `0002` — HNSW over `binary_quantize(...)::bit(4096)`.
+pgvector's HNSW cap is per type: 2000 for `vector`, 4000 for `halfvec`, 64000
+for `bit`, so the bit form is the one that fits 4096-d.
+
+It is **not used by default** (`ANN_CANDIDATES=0`). Exact search is 18.5 ms at
+4,800 enrolled, which is nothing beside four GPU inferences, and the ANN path
+trades a small amount of recall — a false rejection here, which is the
+expensive direction. Measured numbers and the recall-validation query are in
+[documentation/04-database.md](../documentation/04-database.md).
 
 ### Threshold semantics changed
 
