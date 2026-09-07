@@ -46,10 +46,18 @@ env:
   # set and turned the job red against an unchanged tree.
   UV_VERSION: "0.11.21"
   RUFF_VERSION: "0.14.5"
-  # 0.58.1 could NOT parse uv.lock — it detected zero targets, so the CVE jobs
-  # would have reported "no vulnerabilities" while scanning nothing at all.
-  # uv.lock support landed later; verified that 0.70.0 finds both lockfiles.
-  TRIVY_VERSION: "v0.70.0"
+  # uv.lock support landed in trivy v0.59.0 (PR #8080, "feat(python): add
+  # support for uv", merged 2024-12-11; the parser at
+  # pkg/dependency/parser/python/uv first appears in that tag). Anything older
+  # silently detects ZERO targets and reports a clean tree while scanning
+  # nothing — measured: 0.58.1 -> 0 targets, 0.59.0 -> 2 targets / 65 findings,
+  # identical to 0.70.0.
+  #
+  # Installed from the upstream release with its published SHA256 rather than
+  # through a wrapper action, so nothing but this file decides which binary
+  # runs in the security stage.
+  TRIVY_VERSION: "0.70.0"
+  TRIVY_SHA256: "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
 
 jobs:
   # ══ verify ══════════════════════════════════════════════════════════════════
@@ -226,6 +234,66 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Build proves it compiles; this proves it runs. The gap between the two
+      # is where the CORS_ORIGINS crash-loop lived — the image built fine and
+      # every worker died at import. Cheap to close, so close it.
+      - name: Smoke-test the built image
+        run: |
+          set -euo pipefail
+          docker network create smoke
+          docker run -d --name smoke_pg --network smoke \
+            -e POSTGRES_PASSWORD=t -e POSTGRES_DB=sig -e POSTGRES_USER=sig \
+            -v "$PWD/inference/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
+            pgvector/pgvector:pg17
+          for _ in $(seq 1 30); do
+            docker exec smoke_pg pg_isready -h 127.0.0.1 -U sig -d sig >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker run -d --name smoke_api --network smoke -p 18080:8080 \
+            -e POSTGRES_HOST=smoke_pg -e POSTGRES_DB=sig -e POSTGRES_USER=sig \
+            -e POSTGRES_PASSWORD=t -e TRITON_HOST=triton \
+            -e CORS_ORIGINS=http://localhost:8110 \
+            "signature-inference-api:${{ github.sha }}"
+          for _ in $(seq 1 30); do
+            curl -sf localhost:18080/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          echo "--- /health ---"
+          curl -sf localhost:18080/health | tee /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+
+          echo "--- /signatures (real DB round trip) ---"
+          curl -sf localhost:18080/signatures | tee /tmp/sigs.json
+          grep -q '"total":0' /tmp/sigs.json
+
+          echo "--- CORS: configured origin allowed, others not ---"
+          allowed=$(curl -s -o /dev/null -D- -H 'Origin: http://localhost:8110' \
+                      localhost:18080/health | grep -ci 'access-control-allow-origin' || true)
+          denied=$(curl -s -o /dev/null -D- -H 'Origin: http://evil.test' \
+                      localhost:18080/health | grep -ci 'access-control-allow-origin' || true)
+          echo "  allowed-origin header count=$allowed (want 1), other-origin=$denied (want 0)"
+          test "$allowed" -eq 1
+          test "$denied" -eq 0
+
+          echo "--- 2 uvicorn workers, no reloader ---"
+          workers=$(docker logs smoke_api 2>&1 | grep -c 'Started server process' || true)
+          reloader=$(docker logs smoke_api 2>&1 | grep -ci 'reloader started' || true)
+          echo "  workers=$workers (want 2), reloader=$reloader (want 0)"
+          test "$workers" -eq 2
+          test "$reloader" -eq 0
+
+          echo "--- pip is gone from the runtime image ---"
+          if docker run --rm --entrypoint sh "signature-inference-api:${{ github.sha }}" \
+               -c 'command -v pip >/dev/null 2>&1 || python -c "import pip" 2>/dev/null'; then
+            echo "  pip is still present in the runtime image"; exit 1
+          fi
+          echo "  pip absent"
+
+          echo "SMOKE OK"
+          docker rm -f smoke_api smoke_pg >/dev/null
+          docker network rm smoke >/dev/null
+
       # Handed to security-container-cve-scan, mirroring ClawRT's
       # `needs: [{job: build-api, artifacts: true}]`.
       - name: Export the image for scanning
@@ -328,12 +396,11 @@ jobs:
   # `continue-on-error` mirrors ClawRT's `allow_failure: true` on its scan jobs:
   # a new CVE disclosed upstream must not turn an unrelated pull request red.
   # Findings still surface in the run summary and in code scanning.
-  # Currently reports 19 HIGH (inference) and 18 HIGH + 1 CRITICAL (training)
-  # against the committed lockfiles — pillow, python-multipart, starlette, onnx,
-  # and torch 2.3.0 (CVE-2025-32434, the `torch.load` RCE, fixed in 2.6.0).
-  # Deliberately NOT fixed here: bumping torch and starlette across a major is a
-  # change that needs its own verification pass, not a drive-by in a CI PR.
-  # The findings land in code scanning so they are tracked rather than lost.
+  # Baseline: both lockfiles are at ZERO HIGH/CRITICAL as of this commit, so any
+  # finding here is either a fresh upstream disclosure or a regression from a
+  # dependency change. Still `continue-on-error` — a CVE disclosed upstream
+  # overnight must not redden an unrelated pull request — but the table is
+  # printed in the log and the SARIF lands in code scanning, so it is visible.
   security-source-cve-scan:
     name: security / source cve scan
     runs-on: ubuntu-latest
@@ -344,17 +411,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Install trivy ${{ env.TRIVY_VERSION }} (checksum-verified)
+        run: |
+          set -euo pipefail
+          url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSLf -o /tmp/trivy.tar.gz "$url"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
+
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          version: ${{ env.TRIVY_VERSION }}
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          format: sarif
-          output: trivy-fs.sarif
-          exit-code: "0"
+        run: |
+          trivy fs . --scanners vuln --severity HIGH,CRITICAL \
+                --format sarif --output trivy-fs.sarif --no-progress --exit-code 0
+          trivy fs . --scanners vuln --severity HIGH,CRITICAL \
+                --format table --no-progress --exit-code 0
 
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
@@ -377,16 +449,20 @@ jobs:
       # verified finding for the same reason: a leaked credential is not a
       # backlog item. This repo has had two tokens pasted into it in the past,
       # so the gate earns its place.
+      - name: Install trivy ${{ env.TRIVY_VERSION }} (checksum-verified)
+        run: |
+          set -euo pipefail
+          url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSLf -o /tmp/trivy.tar.gz "$url"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
+
       - name: Trivy secret scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          version: ${{ env.TRIVY_VERSION }}
-          scan-type: fs
-          scan-ref: .
-          scanners: secret
-          severity: HIGH,CRITICAL
-          format: table
-          exit-code: "1"
+        run: |
+          trivy fs . --scanners secret --severity HIGH,CRITICAL \
+                --format table --no-progress --exit-code 1
 
   security-container-cve-scan:
     name: security / container cve scan
@@ -405,16 +481,23 @@ jobs:
       - name: Load the image
         run: docker load -i /tmp/api-image.tar
 
+      - name: Install trivy ${{ env.TRIVY_VERSION }} (checksum-verified)
+        run: |
+          set -euo pipefail
+          url="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSLf -o /tmp/trivy.tar.gz "$url"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
+
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          version: ${{ env.TRIVY_VERSION }}
-          scan-type: image
-          image-ref: signature-inference-api:${{ github.sha }}
-          severity: HIGH,CRITICAL
-          format: sarif
-          output: trivy-image.sarif
-          exit-code: "0"
+        run: |
+          trivy image "signature-inference-api:${{ github.sha }}" \
+                --severity HIGH,CRITICAL --format sarif \
+                --output trivy-image.sarif --no-progress --exit-code 0
+          trivy image "signature-inference-api:${{ github.sha }}" \
+                --severity HIGH,CRITICAL --format table --no-progress --exit-code 0
 
       - uses: github/codeql-action/upload-sarif@v4
         if: always()

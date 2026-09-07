@@ -17,8 +17,8 @@ dependencies = [
     # only for CycleGAN training and the .pth -> ONNX export; see the `cpu`
     # extra below if you train CycleGAN elsewhere.
     "tensorflow==2.21.0",
-    "torch==2.3.0",
-    "torchvision==0.18.0",
+    "torch==2.6.0",
+    "torchvision==0.21.0",
 
     # ── CycleGAN (the upstream repo imports these unconditionally) ─────────────
     # util/visualizer.py has a module-level `import wandb`; util/html.py imports
@@ -32,7 +32,7 @@ dependencies = [
     "ultralytics==8.3.49",
 
     # ── ONNX ──────────────────────────────────────────────────────────────────
-    "onnx==1.17.0",
+    "onnx==1.22.0",
     # 1.17.0, not 1.16.1: the older release pins protobuf~=3.20 while
     # tensorflow 2.21.0 requires protobuf>=6.31.1, which is unsatisfiable.
     # 1.17.0 relaxes it and adds the Keras 3 shims from_keras needs.
@@ -47,7 +47,7 @@ dependencies = [
     "numpy==1.26.4",
     "scipy==1.14.1",
     "scikit-learn==1.5.2",
-    "pillow==11.0.0",
+    "pillow==12.3.0",
     # headless: nothing here calls imshow/namedWindow/waitKey across 23 cv2 call
     # sites, and the GUI build fails to import in a slim container for want of
     # libGL.

@@ -71,6 +71,25 @@ RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
+# Strip the base image's system pip/setuptools/wheel.
+#
+# The service runs entirely from /opt/venv, which uv builds without pip and
+# which does not enable system-site-packages — so nothing here is reachable at
+# runtime. It is still in the image, and it is still the only part of the image
+# with CVEs anyone can actually act on: of the 80 findings the container scan
+# reports, exactly two carry a fixed version, and both live here —
+# CVE-2026-24049 (wheel) and CVE-2026-23949 (jaraco.context, vendored inside
+# setuptools). Every Debian-layer finding is will_not_fix / fix_deferred with no
+# patched package to move to.
+#
+# Removing it also takes a package manager out of a production container, which
+# is worth doing on its own.
+RUN for pkg in pip setuptools wheel pkg_resources _distutils_hack; do \
+        rm -rf /usr/local/lib/python*/site-packages/"$pkg"*; \
+    done \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
+    && python -c "import sys; print('system python still OK:', sys.version.split()[0])"
+
 RUN groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser
 
 WORKDIR /app

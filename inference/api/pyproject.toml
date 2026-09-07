@@ -9,15 +9,15 @@ requires-python = "==3.11.*"
 # what `uv sync --frozen` guarantees and a floating range does not.
 dependencies = [
     # ── API ───────────────────────────────────────────────────────────────────
-    "fastapi==0.115.6",
+    "fastapi==0.141.1",
     # [standard] already provides uvloop and httptools; listing them separately
     # only creates a second place for the versions to drift.
-    "uvicorn[standard]==0.32.1",
+    "uvicorn[standard]==0.38.0",
     # >= 0.0.18 for CVE-2024-53981: a multipart body of bare CRs kept the parser
     # in a per-byte loop, so a ~1.5 MiB upload burned ~42 s of CPU on one worker.
     # Both /register-signature and /verify-document are unauthenticated
     # multipart endpoints, so this was directly reachable.
-    "python-multipart==0.0.20",
+    "python-multipart==0.0.32",
 
     # ── Database ──────────────────────────────────────────────────────────────
     "asyncpg==0.30.0",
@@ -32,7 +32,7 @@ dependencies = [
     "tritonclient[http]==2.46.0",
 
     # ── Image & PDF ───────────────────────────────────────────────────────────
-    "pillow==11.0.0",
+    "pillow==12.3.0",
     # numpy stays on 1.x: tritonclient 2.46.0 is the version tested against the
     # pinned server, and nothing here needs the 2.x API.
     "numpy==1.26.4",

@@ -11,7 +11,12 @@ input {
 output {
   name: "output"
   data_type: TYPE_FP32
-  dims: [ 3, 224, 224 ]
+  # Symbolic, not a mistake. The generator is fully convolutional, so the ONNX
+  # tracer cannot prove H_out == H_in and emits dim_params for both spatial
+  # axes. torch 2.3 did the same (Tanhoutput_dim_2/3), which is why the original
+  # convert_to_trt-generated config also carried [ 3, -1, -1 ].
+  # `sigtrain export` regenerates exactly this, so the first export stays a no-op.
+  dims: [ 3, -1, -1 ]
 }
 
 instance_group [

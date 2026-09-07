@@ -43,6 +43,11 @@ def export(
     # cloned, not a declared dependency.
     from models.networks import define_G  # ty: ignore[unresolved-import]
 
+    # No `gpu_ids` argument. Upstream's define_G signature is
+    #   define_G(input_nc, output_nc, ngf, netG, norm, use_dropout,
+    #            init_type, init_gain)
+    # and passing gpu_ids raises TypeError against a current clone. Export runs
+    # on CPU regardless — the checkpoint is mapped to `device` on load.
     net = define_G(
         input_nc=3,
         output_nc=3,
@@ -52,7 +57,6 @@ def export(
         use_dropout=False,
         init_type="normal",
         init_gain=0.02,
-        gpu_ids=[],
     )
 
     # weights_only=True refuses to unpickle arbitrary objects; a generator
@@ -75,7 +79,11 @@ def export(
     logger.info("Exporting %s -> %s", checkpoint.name, onnx_path.name)
     torch.onnx.export(
         net,
-        dummy,
+        # A 1-tuple, not a bare tensor. torch 2.6 types this parameter as
+        # `tuple[Any, ...]`; a lone Tensor still works because the exporter wraps
+        # it, but the tuple is the documented form and the one that survives the
+        # ongoing migration to the dynamo exporter.
+        (dummy,),
         str(onnx_path),
         export_params=True,
         opset_version=opset,

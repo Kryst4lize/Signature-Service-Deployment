@@ -6,6 +6,17 @@
 # NVIDIA network, override in .env:
 #   TRAINING_BASE_IMAGE=10.254.144.152/tessel/training-service-base:0.0.1
 #   USE_INTERNAL_APT=1
+# NOTE on the CUDA stack, verified while upgrading torch to 2.6.0:
+#   * torch brings its own CUDA via the nvidia-* wheels (now cu124, cudnn
+#     9.1.0.70), so it does not use this base image's CUDA at all — the base
+#     only has to be new enough for the host driver.
+#   * TensorFlow is installed WITHOUT its `and-cuda` extra, so it looks for
+#     system CUDA. TF 2.21 wants cudnn >= 9.3.0.75 and this base ships cudnn 8,
+#     so TF very likely falls back to CPU here. That predates this upgrade —
+#     it was already true with torch 2.3 — and is untested because there is no
+#     GPU on hand. If you need GPU-accelerated Keras training, either move to a
+#     cudnn 9.3+ base or install `tensorflow[and-cuda]`; note the latter pins
+#     cudnn >= 9.3 against torch's ==9.1.0.70 and will not co-resolve.
 ARG TRAINING_BASE_IMAGE=nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 # Pinned: uv is part of the build toolchain, so it is versioned like everything
 # else rather than floating on :latest.
