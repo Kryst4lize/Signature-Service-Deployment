@@ -84,13 +84,24 @@ RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime \
 #
 # Removing it also takes a package manager out of a production container, which
 # is worth doing on its own.
+# distutils-precedence.pth is removed with them on purpose: it outlives the
+# packages and then fails to import `_distutils_hack` on every interpreter
+# start, printing a ModuleNotFoundError to stderr from `python`, `alembic` and
+# anything else that runs in this image.
 RUN for pkg in pip setuptools wheel pkg_resources _distutils_hack; do \
         rm -rf /usr/local/lib/python*/site-packages/"$pkg"*; \
     done \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
-    && rm -f /usr/local/lib/python*/site-packages/distutils-precedence.pth \
-    && python -c "import sys; print('system python still OK:', sys.version.split()[0])" 2>&1 \
-    | grep -qv "No module named" || (echo "interpreter startup is not clean"; exit 1)
+    && rm -f /usr/local/lib/python*/site-packages/distutils-precedence.pth
+
+# Assert the interpreter starts silently. Deliberately its own RUN with no
+# pipe: piping into grep needs `SHELL -o pipefail` to be meaningful (DL4006),
+# and `A && B || C` is not if-then-else (SC2015).
+RUN startup="$(python -c 'print("ok")' 2>&1)"; \
+    if [ "$startup" != "ok" ]; then \
+        echo "interpreter startup is not clean: $startup"; \
+        exit 1; \
+    fi
 
 RUN groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser
 
