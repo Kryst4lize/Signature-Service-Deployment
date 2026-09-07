@@ -88,7 +88,9 @@ RUN for pkg in pip setuptools wheel pkg_resources _distutils_hack; do \
         rm -rf /usr/local/lib/python*/site-packages/"$pkg"*; \
     done \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
-    && python -c "import sys; print('system python still OK:', sys.version.split()[0])"
+    && rm -f /usr/local/lib/python*/site-packages/distutils-precedence.pth \
+    && python -c "import sys; print('system python still OK:', sys.version.split()[0])" 2>&1 \
+    | grep -qv "No module named" || (echo "interpreter startup is not clean"; exit 1)
 
 RUN groupadd -r appuser && useradd -r -g appuser -s /sbin/nologin appuser
 
@@ -97,6 +99,11 @@ WORKDIR /app
 # cannot shadow it.
 COPY --from=builder /opt/venv /opt/venv
 COPY app/ ./app/
+# The compose `migrate` service runs `alembic upgrade head` from this image.
+# Without these it fails with "No config file 'alembic.ini' found" — which the
+# test suite does not catch, because it bind-mounts the source tree instead.
+COPY alembic.ini ./
+COPY migrations/ ./migrations/
 
 RUN chown -R appuser:appuser /app
 USER appuser
