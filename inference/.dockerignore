@@ -1,0 +1,18 @@
+# The test-runner image (tests/Dockerfile) builds with inference/ as its context.
+# Without this, the Docker client uploads and hashes the whole directory —
+# including triton/model_repository, which holds hundreds of MB of ONNX weights
+# after `sigtrain export`.
+
+triton/model_repository/*/1/
+*.onnx
+*.plan
+*.engine
+
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/

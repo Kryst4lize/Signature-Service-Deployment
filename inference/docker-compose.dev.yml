@@ -1,0 +1,24 @@
+# Development overlay: hot reload plus the app source bind-mounted.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# The production image deliberately does not carry --reload; uvicorn's
+# should_reload wins over --workers, so shipping it turns a 2-worker service
+# into a single-process reloader.
+
+services:
+  api:
+    environment:
+      APP_ENV: development
+    volumes:
+      - ./api/app:/app/app:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --reload
+      - --reload-dir
+      - /app/app

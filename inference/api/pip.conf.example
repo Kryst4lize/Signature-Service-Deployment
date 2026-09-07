@@ -1,0 +1,11 @@
+# Copy to pip.conf when building inside the NVIDIA network, then set
+# USE_INTERNAL_APT=1 in ../.env. pip.conf itself is gitignored.
+#
+#     cp pip.conf.example pip.conf
+#
+# Without a pip.conf the build goes to public PyPI, which is what you want
+# from any other network.
+[global]
+index-url = http://10.254.144.164:8081/repository/pypi-group/simple
+trusted-host = 10.254.144.164
+timeout = 60

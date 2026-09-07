@@ -1,0 +1,82 @@
+# Default pipeline configuration.
+#
+# Every stage reads this one file, so paths stay consistent between them.
+# Relative paths resolve against training/, never against your shell's cwd.
+#
+# Override per run without editing:
+#     sigtrain train-verification --set verification.phase1_epochs=5
+#
+# Or copy this file and pass --config my.yaml.
+
+paths:
+  # Kaggle signature-verification-dataset, extracted. Expects train/ and test/
+  # containing per-person folders (NNN/ genuine, NNN_forg/ forged).
+  raw_signatures: data/raw/sign_data
+  # Stamp/seal images used as CycleGAN noise. Not redistributable; supply your own.
+  stamps: data/raw/stamps
+
+  cyclegan_dataset: data/processed/cyclegan
+  verification_dataset: data/processed/verification
+
+  # Cloned by `sigtrain setup`; not vendored.
+  cyclegan_repo: external/pytorch-CycleGAN-and-pix2pix
+  cyclegan_checkpoints: artifacts/cyclegan
+
+  models: artifacts/models
+  evaluation: artifacts/evaluation
+  onnx: artifacts/onnx
+
+  # `sigtrain export` writes the finished Triton tree straight into the
+  # inference service.
+  triton_repository: ../inference/triton/model_repository
+
+cyclegan_data:
+  image_size: 512
+  test_ratio: 0.10
+  seed: 42
+  p_lines: 0.9
+  p_text: 0.9
+  p_stamp: 0.70
+
+cyclegan_train:
+  name: signature
+  n_epochs: 100
+  n_epochs_decay: 100
+  # Upstream defaults. The 512 canvas is resized to load_size then randomly
+  # cropped to crop_size, so these — not cyclegan_data.image_size — are the
+  # resolution the generator actually learns at.
+  load_size: 286
+  crop_size: 256
+  norm: instance
+  gpu_ids: "0"
+  extra_args: []
+
+verification:
+  backbone: both          # vgg16 | resnet50 | both
+  image_size: 224
+  batch_size: 32
+  val_split: 0.15
+  phase1_epochs: 50
+  phase2_epochs: 10
+  phase1_lr: 0.001
+  phase2_lr: 0.0001
+  embedding_dim: 4096     # must match VECTOR(n) in inference/postgres/init.sql
+  seed: 42
+  vgg16_weights: ""       # optional local .h5 to skip the Keras download
+  resnet50_weights: ""
+
+evaluate:
+  image_size: 224
+  # Impostor pairs sampled per person-pair. The original code used 1, which
+  # left the ROC's low-FAR region quantised at 1/210 and made the reported
+  # "TAR @ FAR 0.1%" row degenerate.
+  impostor_pairs_per_couple: 8
+  seed: 42
+
+export:
+  opset: 13
+  image_size: 224
+  yolo_image_size: 640
+  max_batch_size: 1
+  instance_kind: KIND_GPU   # KIND_CPU to serve without a GPU
+  simplify: true

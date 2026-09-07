@@ -14,7 +14,7 @@
 *.jpeg
 *.png
 *.pdf
-!docs/**/*.png
+!documentation/**/*.png
 
 # ── Secrets & machine-local config ────────────────────────────────────────────
 # Real .env files never get committed; the *.example templates always do.
@@ -48,6 +48,9 @@ htmlcov/
 
 # ── Notebooks ─────────────────────────────────────────────────────────────────
 .ipynb_checkpoints
+
+# CI test reports (--junitxml), uploaded as artifacts rather than committed.
+report.xml
 
 # ── Temporary ─────────────────────────────────────────────────────────────────
 *.tmp

@@ -1,0 +1,17 @@
+-- Bootstrap only. THE SCHEMA IS OWNED BY ALEMBIC, not by this file.
+--
+-- The Postgres entrypoint runs everything in /docker-entrypoint-initdb.d ONLY
+-- when PGDATA is empty, so anything defined here silently stops applying the
+-- moment a volume exists. That is the trap the previous version of this file
+-- fell into: it created `items`, and editing it afterwards changed nothing on
+-- any running deployment.
+--
+-- The table, its indexes, and every later change now live in
+-- api/migrations/versions/, applied by the `migrate` service in
+-- docker-compose.yml before the api starts.
+--
+-- Creating the extension is kept here because it needs superuser, which the
+-- entrypoint has and the application role may not. It is idempotent and
+-- migration 0001 also issues it, so a database created without this file is
+-- still fine.
+CREATE EXTENSION IF NOT EXISTS vector;

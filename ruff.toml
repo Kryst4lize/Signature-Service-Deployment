@@ -1,0 +1,92 @@
+# Shared lint + format configuration for both halves of the repo.
+#
+# Ruff discovers the nearest config by walking up, and neither training/ nor
+# inference/api/ defines a [tool.ruff] section, so this file governs everything.
+#
+#     uvx ruff check .          # lint
+#     uvx ruff check --fix .    # lint and apply safe fixes
+#     uvx ruff format .         # format
+
+line-length = 100
+target-version = "py311"
+
+exclude = [
+    ".venv",
+    "training/external",     # cloned upstream CycleGAN repo, not ours
+    "training/artifacts",
+    "training/data",
+]
+
+[lint]
+select = [
+    "F",      # pyflakes            — undefined names, unused imports/variables
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "I",      # isort               — import ordering
+    "UP",     # pyupgrade           — modern syntax for the target version
+    "B",      # bugbear             — likely bugs (mutable defaults, raise-without-from)
+    "C4",     # comprehensions
+    "SIM",    # simplify
+    "RET",    # return statements
+    "PIE",    # misc lints
+    "PERF",   # performance anti-patterns
+    "LOG",    # logging misuse
+    "G",      # logging format strings
+    "ICN",    # import conventions   — np, pd, plt
+    "ISC",    # implicit string concat
+    "S",      # bandit               — security
+    "RUF",    # ruff-specific
+]
+
+ignore = [
+    # Message style. These demand every exception message be hoisted into a
+    # variable first; 50 findings of pure ceremony on a codebase whose error
+    # messages are deliberately long and instructive.
+    "TRY003", "EM101", "EM102",
+
+    # Relative imports inside the package are intentional — they are what makes
+    # signature_training relocatable.
+    "TID252",
+
+    # Box-drawing separators, arrows in metric tables, and Vietnamese names in
+    # the augmentation corpus are all deliberate non-ASCII.
+    "RUF001", "RUF002", "RUF003",
+
+    # Conflicts with the formatter.
+    "ISC001",
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = [
+    "S101",    # assert is the point of a test
+    "S105", "S106",  # throwaway credentials in fixtures
+    "ARG",     # pytest fixtures are injected, not called
+]
+"training/src/signature_training/cli.py" = [
+    "T201",    # the CLI's job is to print
+]
+"training/src/signature_training/evaluate/runner.py" = [
+    "T201",    # the metric report is printed, deliberately, as a block
+]
+"training/src/signature_training/train/cyclegan.py" = [
+    "S603", "S607",  # invoking git and the upstream train.py is the whole module
+]
+"training/src/signature_training/data/noise/**" = [
+    "S311",    # augmentation randomness is not cryptographic
+]
+"inference/api/app/routes.py" = [
+    # FastAPI's dependency-injection idiom is a call in a default argument.
+    "B008",
+]
+
+[lint.flake8-bugbear]
+# Same idiom, for the parameters ruff evaluates outside routes.py.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query",
+]
+
+[lint.isort]
+known-first-party = ["app", "signature_training"]
+
+[format]
+docstring-code-format = true

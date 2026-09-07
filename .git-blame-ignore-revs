@@ -1,0 +1,6 @@
+# Revisions that only reformat. Ignore them in blame:
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub honours this file automatically.)
+
+# (Style): apply ruff format
+e3d305c06d2c766af308a9f71b651aed9d9deacb
