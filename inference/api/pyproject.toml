@@ -40,10 +40,15 @@ dependencies = [
 
     # ── Config ────────────────────────────────────────────────────────────────
     "pydantic-settings==2.7.0",
+
+    # ── Migrations ────────────────────────────────────────────────────────────
+    # The schema is owned by migrations/, not by postgres/init.sql — the
+    # entrypoint only runs init scripts when PGDATA is empty, so an edited
+    # init.sql silently does nothing on an existing deployment.
+    "alembic==1.14.0",
 ]
 
 # Deliberately absent, each verified unimported by the service:
-#   alembic                  no migrations/ exists; the schema is postgres/init.sql
 #   opencv-python-headless   no cv2 anywhere under app/ (only training uses it)
 #   python-dotenv            pydantic-settings brings its own .env reader
 #   tritonclient[grpc]       unused

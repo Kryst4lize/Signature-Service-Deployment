@@ -18,7 +18,9 @@ router = APIRouter()
 # scan does not turn into several MB of JSON per page.
 PREVIEW_MAX_EDGE = 1024
 
-_NEAREST_SQL = text(
+# Exact: score every enrolled signature. 18.5 ms at 4,800 rows, which is
+# nothing beside the four GPU inferences the same request already paid for.
+_NEAREST_EXACT_SQL = text(
     """
     SELECT id,
            username,
@@ -35,6 +37,52 @@ _NEAREST_SQL = text(
     LIMIT 1
     """
 )
+
+# Approximate candidate set, exact re-rank. Enabled by ANN_CANDIDATES > 0.
+#
+# The inner query is the only approximate part: it walks the HNSW index over
+# `binary_quantize(resnet50_vector)::bit(4096)` by Hamming distance (`<~>`) and
+# returns :cand rows. The outer query scores those candidates with the same
+# exact cosine expression the exact path uses, so `avg_distance` — the number
+# compared against MATCH_THRESHOLD — is never an approximation. Only the
+# candidate set is.
+#
+# Candidates are selected on the resnet column alone and re-ranked on the fused
+# score, which keeps this to a single index walk.
+_NEAREST_ANN_SQL = text(
+    """
+    SELECT id,
+           username,
+           (resnet50_vector <=> CAST(:rv AS vector)) AS d_resnet,
+           (vgg16_vector    <=> CAST(:vv AS vector)) AS d_vgg,
+           (
+               (resnet50_vector <=> CAST(:rv AS vector)) +
+               (vgg16_vector    <=> CAST(:vv AS vector))
+           ) / 2 AS avg_distance
+    FROM (
+        SELECT id, username, resnet50_vector, vgg16_vector
+        FROM items
+        WHERE resnet50_vector IS NOT NULL
+          AND vgg16_vector    IS NOT NULL
+        ORDER BY binary_quantize(resnet50_vector)::bit(4096)
+                 <~> binary_quantize(CAST(:rv AS vector))::bit(4096)
+        LIMIT :cand
+    ) AS candidates
+    ORDER BY avg_distance ASC
+    LIMIT 1
+    """
+)
+
+
+async def _nearest(db: AsyncSession, resnet_vec, vgg_vec):
+    """Best match for these embeddings, or None if nothing is enrolled."""
+    params: dict = {"rv": str(resnet_vec.tolist()), "vv": str(vgg_vec.tolist())}
+    if settings.ann_candidates > 0:
+        params["cand"] = settings.ann_candidates
+        result = await db.execute(_NEAREST_ANN_SQL, params)
+    else:
+        result = await db.execute(_NEAREST_EXACT_SQL, params)
+    return result.mappings().first()
 
 
 async def _read_upload(file: UploadFile) -> bytes:
@@ -238,16 +286,7 @@ async def verify_document(
         entry["crop_after"] = pil_to_b64(tensor_to_pil(clean))
 
         # ── Nearest neighbour by cosine distance ──────────────────────────────
-        match = (
-            (
-                await db.execute(
-                    _NEAREST_SQL,
-                    {"rv": str(resnet_vec.tolist()), "vv": str(vgg_vec.tolist())},
-                )
-            )
-            .mappings()
-            .first()
-        )
+        match = await _nearest(db, resnet_vec, vgg_vec)
 
         if match is None:
             entry["status"] = "no_match_in_db"

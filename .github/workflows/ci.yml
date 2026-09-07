@@ -249,6 +249,17 @@ jobs:
             docker exec smoke_pg pg_isready -h 127.0.0.1 -U sig -d sig >/dev/null 2>&1 && break
             sleep 2
           done
+          # The schema comes from alembic now — init.sql only creates the
+          # extension — so the migration has to run before the api can serve
+          # /signatures. This is the same image and the same command the
+          # compose `migrate` service uses, so it also proves alembic.ini and
+          # migrations/ actually made it into the image.
+          echo "--- alembic upgrade head ---"
+          docker run --rm --network smoke \
+            -e POSTGRES_HOST=smoke_pg -e POSTGRES_DB=sig -e POSTGRES_USER=sig \
+            -e POSTGRES_PASSWORD=t -e TRITON_HOST=triton \
+            "signature-inference-api:${{ github.sha }}" alembic upgrade head
+
           docker run -d --name smoke_api --network smoke -p 18080:8080 \
             -e POSTGRES_HOST=smoke_pg -e POSTGRES_DB=sig -e POSTGRES_USER=sig \
             -e POSTGRES_PASSWORD=t -e TRITON_HOST=triton \
@@ -282,6 +293,12 @@ jobs:
           echo "  workers=$workers (want 2), reloader=$reloader (want 0)"
           test "$workers" -eq 2
           test "$reloader" -eq 0
+
+          echo "--- interpreter starts clean (no orphaned .pth) ---"
+          out=$(docker run --rm --entrypoint python \
+                  "signature-inference-api:${{ github.sha }}" -c 'print("ok")' 2>&1)
+          echo "  python startup: $out"
+          test "$out" = "ok"
 
           echo "--- pip is gone from the runtime image ---"
           if docker run --rm --entrypoint sh "signature-inference-api:${{ github.sha }}" \

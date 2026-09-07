@@ -199,6 +199,39 @@ def test_verify_matches_the_signature_it_was_registered_from(client):
     client.delete(f"/signatures/{reg.json()['id']}")
 
 
+@pytest.mark.parametrize("candidates", [0, 100])
+def test_verify_agrees_between_exact_and_ann_search(client, monkeypatch, candidates):
+    """The ANN path must return the same verdict as the exact path.
+
+    Also the only place `LIMIT :cand` is exercised through SQLAlchemy — a bind
+    parameter in a LIMIT clause is exactly the kind of thing that works in psql
+    and fails in the driver.
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "ann_candidates", candidates)
+
+    img = _png(color=(77, 88, 99))
+    reg = client.post(
+        "/register-signature",
+        data={"username": "annmode"},
+        files={"file": ("sig.png", img, "image/png")},
+    )
+    assert reg.status_code == 201
+
+    client.fake_triton.detect_result = ([0.0, 0.0, 1.0, 1.0], 0.99)
+    r = client.post("/verify-document", files={"file": ("doc.png", img, "image/png")})
+    assert r.status_code == 200
+
+    page = r.json()["results"][0]
+    assert page["status"] == "matched"
+    assert page["username"] == "annmode"
+    assert page["matched"] is True
+    assert 0.0 <= page["avg_distance"] <= 2.0
+
+    client.delete(f"/signatures/{reg.json()['id']}")
+
+
 def test_verify_returns_distances_within_the_cosine_range(client):
     reg = client.post(
         "/register-signature",

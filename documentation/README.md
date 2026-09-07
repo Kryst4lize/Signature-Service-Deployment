@@ -15,7 +15,7 @@ This folder covers the things that span both halves.
 | 1 | [Architecture](./01-architecture.md) | System design, the four models, data flow, ports |
 | 2 | [Pipeline deep dive](./02-pipeline-deep-dive.md) | Why the ML is built this way; the preprocessing contract |
 | 3 | [API reference](./03-api-reference.md) | REST endpoints, schemas, error codes |
-| 4 | [Database](./04-database.md) | Schema, vector search, why there is no ANN index |
+| 4 | [Database](./04-database.md) | Schema, migrations, vector indexing at 4096 dimensions |
 | 5 | [Operations](./05-operations.md) | Upgrades, backup, monitoring, capacity |
 | 6 | [Troubleshooting](./06-troubleshooting.md) | Symptom → cause → fix |
 
