@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Index, Integer, String, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -32,6 +32,16 @@ class Item(Base):
     """One registered signature: identity plus its two embeddings."""
 
     __tablename__ = "items"
+
+    # Declared here as well as in migration 0001 so the two agree. Without it,
+    # `alembic revision --autogenerate` sees an index in the database that is
+    # absent from the metadata and helpfully proposes dropping it — which would
+    # land in whatever unrelated migration someone generated next.
+    #
+    # The ANN indexes are NOT declared: they are expression indexes over
+    # `binary_quantize(...)::bit(4096)`, which SQLAlchemy cannot model, so
+    # migrations/env.py excludes them from autogenerate by name instead.
+    __table_args__ = (Index("idx_items_username", "username"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(50), nullable=False)

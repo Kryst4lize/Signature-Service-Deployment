@@ -49,6 +49,31 @@ services:
       retries: 10
       start_period: 30s
 
+  # ── Schema migrations ───────────────────────────────────────────────────────
+  # A one-shot job, not a step in the api entrypoint. With `--workers 2` an
+  # entrypoint migration would race two processes against the same DDL; running
+  # it once and gating the api on its SUCCESSFUL completion removes that
+  # entirely, and a failed migration stops the api from starting at all.
+  migrate:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+      args:
+        API_BASE_IMAGE: ${API_BASE_IMAGE:-python:3.11-slim-bookworm}
+        USE_INTERNAL_APT: ${USE_INTERNAL_APT:-0}
+    container_name: sig_migrate
+    restart: "no"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # ── FastAPI service ─────────────────────────────────────────────────────────
   api:
     build:
@@ -73,6 +98,7 @@ services:
       DETECTION_CONFIDENCE: ${DETECTION_CONFIDENCE:-0.5}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
       MAX_PDF_PAGES: ${MAX_PDF_PAGES:-20}
+      ANN_CANDIDATES: ${ANN_CANDIDATES:-0}
     ports:
       - "8080:8080"
     depends_on:
@@ -80,6 +106,8 @@ services:
         condition: service_healthy
       triton:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   # ── Frontend (nginx) ────────────────────────────────────────────────────────
   frontend:

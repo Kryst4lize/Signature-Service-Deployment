@@ -62,7 +62,14 @@ test-integration: test-image  ## unit + endpoint tests against a throwaway pgvec
 	    docker exec $(PGTEST) pg_isready -h 127.0.0.1 -U sig -d sig >/dev/null 2>&1 && break; \
 	    sleep 2; \
 	 done
-	@# The schema must exist too, not just the server.
+	@# The schema comes from alembic now, not from init.sql — the entrypoint only
+	@# runs init scripts on an empty PGDATA, so it cannot own a schema that
+	@# changes. This is the same `alembic upgrade head` the migrate service runs.
+	@echo "applying migrations..."
+	@docker run --rm --network $(PGNET) -v "$(CURDIR):/w" -w /w/api \
+	  -e POSTGRES_HOST=$(PGTEST) -e POSTGRES_DB=sig \
+	  -e POSTGRES_USER=sig -e POSTGRES_PASSWORD=test \
+	  $(TEST_IMAGE) alembic upgrade head
 	@docker exec $(PGTEST) psql -U sig -d sig -c 'SELECT 1 FROM items LIMIT 1' >/dev/null
 	@docker run --rm --network $(PGNET) -v "$(CURDIR):/w" \
 	  -e TEST_DATABASE_URL=postgresql+asyncpg://sig:test@$(PGTEST):5432/sig \
