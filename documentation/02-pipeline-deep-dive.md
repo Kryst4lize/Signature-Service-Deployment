@@ -143,9 +143,10 @@ mismatch.
 
 Keras offers only a **post-augmentation** hook: `preprocessing_function` runs
 after rotation, shift, shear and zoom, so it sees the borders those fill in. The
-configured augmentation fills a mean of **10.9%** of the frame with `cval=255`
-(p95 17.3%, max 20.8%, over 300 draws). Those neutral pixels land inside the
-paper band and drag the per-channel means together:
+configured augmentation fills a mean of **10.8%** of the frame with `cval=255`
+(p95 17.8%, over 5,000 draws; stable to 0.2 points across independent seeds).
+Those neutral pixels land inside the paper band and drag the per-channel means
+together:
 
 | | residual cast after `whiten` |
 |---|---|

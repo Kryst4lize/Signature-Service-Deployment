@@ -39,8 +39,9 @@ mode="none" here and gets Caffe preprocessing alone.
 Correcting at build time rather than in this hook is not a preference. Keras only
 offers a POST-augmentation hook: `preprocessing_function` runs after
 rotation/shift/shear/zoom, so it sees the borders those fill in. The configured
-augmentation fills a mean of 10.9% of the frame (p95 17.3%, max 20.8%, over 300
-draws) with `cval=255`; those neutral pixels land inside the paper band and drag
+augmentation fills a mean of 10.8% of the frame (p95 17.8%, over 5,000 draws;
+the estimate is stable to 0.2 points across independent seeds) with `cval=255`;
+those neutral pixels land inside the paper band and drag
 the per-channel means together, weakening the correction from +8.17 -> +0.00
 down to +8.17 -> +0.83. At build time there is no augmentation and the estimate
 is clean.

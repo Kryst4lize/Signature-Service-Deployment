@@ -243,7 +243,7 @@ using it.
 
 `whiten` takes the dataset cast to −0.10 and slightly improves ink/paper
 contrast. It is applied at build time rather than in the Keras hook because that
-hook runs *after* augmentation and would see the 10.9% of the frame `cval=255`
+hook runs *after* augmentation and would see the 10.8% of the frame `cval=255`
 fills, leaving +0.83 of the cast instead of +0.00. Applying it in both places is
 **not** free: `whiten` is idempotent only while its gain clamp does not bind, and
 two passes raise the effective limit to `max_gain²`.

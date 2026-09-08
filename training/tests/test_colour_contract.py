@@ -86,14 +86,15 @@ def test_augmentation_fill_degrades_the_estimate():
     Keras runs `preprocessing_function` AFTER augmentation, so it sees borders
     filled with cval=255. Those neutral pixels join the paper band and pull the
     channel means together. At the mean fill fraction the configured
-    augmentation produces (10.9%), roughly a tenth of the cast survives.
+    augmentation produces (10.8%, over 5,000 draws), roughly a tenth of the cast
+    survives.
     """
     img = page(RAW_SCAN_PAPER)
     clean_residual = abs(cast(colour.whiten(img)))
 
     filled = img.copy()
     rng = np.random.default_rng(1)
-    n = int(224 * 224 * 0.109)
+    n = int(224 * 224 * 0.108)
     filled[rng.integers(0, 224, n), rng.integers(0, 224, n)] = 255.0
     filled_residual = abs(cast(colour.whiten(filled)))
 
@@ -137,17 +138,39 @@ def test_override_reaches_the_new_section():
 
 
 def test_stamp_is_written_and_accepted_on_rerun(tmp_path):
-    cyclegan._check_colour_stamp(tmp_path, "whiten")
+    cyclegan._write_colour_stamp(tmp_path, "whiten")
     assert (tmp_path / cyclegan.COLOUR_STAMP).read_text().strip() == "whiten"
-    cyclegan._check_colour_stamp(tmp_path, "whiten")  # idempotent
+    cyclegan._check_colour_stamp(tmp_path, "whiten")  # same mode: no complaint
 
 
 def test_changing_mode_on_an_existing_dataset_is_refused(tmp_path):
     """build_verification_split skips folders that already exist, so a changed
     mode would otherwise leave half the corpus under the old distribution."""
-    cyclegan._check_colour_stamp(tmp_path, "none")
+    cyclegan._write_colour_stamp(tmp_path, "none")
     with pytest.raises(RuntimeError, match="mix two colour distributions"):
         cyclegan._check_colour_stamp(tmp_path, "whiten")
+
+
+def test_a_failed_build_does_not_lock_the_mode_in(tmp_path):
+    """The stamp is recorded on success, not on entry.
+
+    Stamping up front meant a run that failed on a mistyped `raw_signatures`
+    left an empty stamped directory behind, which then refused every later mode
+    change — claiming to hold images written under a mode, having written none.
+    """
+    dst = tmp_path / "verification"
+    cfg = Config.load(
+        overrides={
+            "paths.raw_signatures": str(tmp_path / "nope"),
+            "paths.verification_dataset": str(dst),
+            "colour.mode": "none",
+        }
+    )
+    with pytest.raises(RuntimeError, match="No genuine person folders"):
+        cyclegan.build_verification_split(cfg)
+    assert not (dst / cyclegan.COLOUR_STAMP).exists(), "stamped a build that wrote nothing"
+    # and the mode is still free to change
+    cyclegan._check_colour_stamp(dst, "whiten")
 
 
 def test_an_unstamped_dataset_with_content_is_none_not_whatever_you_asked_for(tmp_path):
@@ -171,14 +194,15 @@ def test_an_unstamped_dataset_with_content_is_none_not_whatever_you_asked_for(tm
 
 def test_an_unstamped_empty_dataset_is_adoptable(tmp_path):
     """A first run must not trip over the guard meant for later ones."""
-    cyclegan._check_colour_stamp(tmp_path, "whiten")
+    cyclegan._check_colour_stamp(tmp_path, "whiten")  # no raise
+    cyclegan._write_colour_stamp(tmp_path, "whiten")
     assert cyclegan.read_colour_stamp(tmp_path) == "whiten"
 
 
 def test_reading_a_dataset_under_the_wrong_mode_is_refused(tmp_path):
     """The builder's guard alone left training and evaluation free to read a
     corrected corpus with the correction configured off, and say nothing."""
-    cyclegan._check_colour_stamp(tmp_path, "whiten")
+    cyclegan._write_colour_stamp(tmp_path, "whiten")
     cyclegan.require_colour_stamp(tmp_path, "whiten")  # matching: fine
     with pytest.raises(RuntimeError, match="trains on one distribution"):
         cyclegan.require_colour_stamp(tmp_path, "none")

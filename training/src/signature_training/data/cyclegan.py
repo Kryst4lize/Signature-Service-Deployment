@@ -201,6 +201,12 @@ def _check_colour_stamp(dataset: Path, mode: str) -> None:
     though it had checked, and return full counts — training then ran on a
     +8.18 corpus certified as corrected, and the one command that would have
     fixed it (`mode=none`) was now refused by the false stamp.
+
+    Read-only. Recording the mode is `_write_colour_stamp`, and it happens after
+    a build succeeds rather than before it starts: creating the directory and
+    stamping it up front meant a run that failed on a mistyped `raw_signatures`
+    left behind an empty stamped directory, which then refused every later mode
+    change — claiming to hold images written under a mode, having written none.
     """
     previous = read_colour_stamp(dataset)
     if previous and previous != mode:
@@ -217,6 +223,10 @@ def _check_colour_stamp(dataset: Path, mode: str) -> None:
                 else ""
             )
         )
+
+
+def _write_colour_stamp(dataset: Path, mode: str) -> None:
+    """Record the mode, once there is something for it to describe."""
     dataset.mkdir(parents=True, exist_ok=True)
     (dataset / COLOUR_STAMP).write_text(f"{mode}\n")
 
@@ -250,9 +260,10 @@ def _copy_person(folder: Path, target: Path, colour_mode: str) -> None:
     `preprocessing_function` is deliberate: Keras runs that hook AFTER
     augmentation, so it sees the borders rotation and shift fill in with
     `cval=255`. Those neutral pixels sit inside the paper band and pull the
-    per-channel means together, weakening the very correction being applied —
-    measured at a mean 10.9% fill, the dataset cast comes out at +0.83 instead
-    of +0.00. At build time there is no augmentation and the estimate is clean.
+    per-channel means together, weakening the very correction being applied — at
+    the mean 10.8% fill that augmentation produces, the dataset cast comes out at
+    +0.83 instead of +0.00. At build time there is no augmentation and the
+    estimate is clean.
     """
     import shutil
 
@@ -322,4 +333,6 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
             f"No genuine person folders found under {src}. Expected "
             f"{src}/train/<person>/ directories not ending in '_forg'."
         )
+    # Only now, with images actually on disk for it to describe.
+    _write_colour_stamp(dst, cfg.colour.mode)
     return counts

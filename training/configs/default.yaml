@@ -35,7 +35,7 @@ paths:
 #   data-verification   the images the backbones read (data/cyclegan.py:_copy_person)
 #
 # Applied at build time, not at load time, and exactly once. Keras only offers a
-# post-augmentation hook, which sees the ~10.9% of the frame that rotation and
+# post-augmentation hook, which sees the ~10.8% of the frame that rotation and
 # shift fill with cval=255; those neutral pixels bias the paper estimate and
 # leave +0.83 of the cast instead of +0.00. And whiten is idempotent only while
 # its gain clamp does not bind, so correcting twice can reach max_gain**2.
