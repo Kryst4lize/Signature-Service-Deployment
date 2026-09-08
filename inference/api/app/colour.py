@@ -12,9 +12,9 @@ range +7.83..+8.94), which says one scanner and one fixed offset rather than
 per-image variation.
 
 That is why a diagonal (von Kries) correction is the right tool: estimate the
-paper level per channel and scale each channel so paper becomes 255. It is a
-three-multiply operation, it is exactly invertible, and because the cast is
-uniform it removes essentially all of it.
+paper level per channel and scale the channels until they agree. It is a
+three-multiply operation and, because the cast is uniform, it removes
+essentially all of it.
 
 CONTRACT: this is a byte-for-byte mirror of
 training/src/signature_training/data/colour.py. The two halves are independent
@@ -31,19 +31,18 @@ import numpy as np
 # tinted scan, and stretching it to white would destroy the strokes.
 DEFAULT_MAX_GAIN = 1.6
 
-# Fraction of the image treated as "not paper" when estimating the paper colour.
-# The brightest (1 - this) of pixels are taken to be paper, and their per-channel
-# MEDIAN is the estimate.
+# Paper is everything at or above this fraction of `white` in LUMINANCE, and the
+# estimate is the MEAN over that band. A relative threshold, so it survives a
+# globally darker scan.
 #
-# This started as a plain 99th percentile, which was wrong in the case that
-# matters most. On the raw scans it works — paper sits at 243/251, so p99 lands
-# on it. On the DENOISER'S OUTPUT it does not: the generator pushes paper up
-# against 255, so p99 saturates at 255 in all three channels, the computed gain
-# comes out ~1.0, and the correction silently does nothing. Measured on the real
-# latest_net_G_B: paper B-R +3.46 before, +3.45 after. A median over the paper
-# bulk sees the actual level in both cases.
-# Paper is everything at or above this fraction of `white` in luminance. A
-# relative threshold, so it survives a globally darker scan.
+# Two earlier estimators are recorded here because both looked right and both
+# were silently no-ops. A plain 99th percentile works on the raw scans — paper
+# sits at 243/251, so p99 lands on it — but not on the DENOISER'S OUTPUT, where
+# the generator pushes paper against 255: p99 saturates in all three channels,
+# the gain comes out ~1.0, and nothing happens. A median of the brightest
+# fraction fails the same way, landing on the saturated spike. Measured on the
+# real latest_net_G_B, both left paper B-R at +3.46 -> +3.45. The mean over the
+# whole band sees the actual level in both cases.
 DEFAULT_PAPER_LEVEL = 0.78
 
 
@@ -91,6 +90,20 @@ def whiten(
     lift       Also brighten paper toward `white`, not just neutralise it.
 
     Returns the corrected image in the input dtype's range, as float32.
+
+    NOT UNCONDITIONALLY IDEMPOTENT. `whiten(whiten(x))` equals `whiten(x)` only
+    while the `max_gain` clamp does not bind, i.e. while
+    `estimate_paper(x).max() / .min() <= max_gain`. When it does bind the first
+    pass is truncated and leaves the paper un-neutral, so a second pass applies
+    the remainder and the effective limit becomes `max_gain**2` — 2.56 by
+    default, which defeats the point of the clamp. Measured on a tungsten
+    capture with paper (248, 190, 130): one pass caps blue at 1.600x, two reach
+    1.908x.
+
+    The signature corpora are nowhere near that (imbalance 1.034 raw, 1.014
+    denoised, so a second pass moves at most 0.026 levels), but nothing here
+    enforces it. Apply this exactly once per image, on both sides of the
+    train/serve boundary.
     """
     src = img.astype(np.float32)
     paper = estimate_paper(src, paper_level, white).astype(np.float32)

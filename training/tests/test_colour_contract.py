@@ -14,6 +14,8 @@ way the contract could silently stop holding:
 
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pytest
 
@@ -148,6 +150,62 @@ def test_changing_mode_on_an_existing_dataset_is_refused(tmp_path):
         cyclegan._check_colour_stamp(tmp_path, "whiten")
 
 
+def test_an_unstamped_dataset_with_content_is_none_not_whatever_you_asked_for(tmp_path):
+    """The upgrade path this whole guard exists for, and the case an earlier
+    version got backwards.
+
+    Every dataset built before the correction moved into the builder is
+    unstamped AND uncorrected. Assuming it matches the current run let the first
+    `colour.mode: whiten` skip every folder, write a stamp asserting `whiten`,
+    and return full counts — a +8.18 corpus certified as corrected, with the one
+    command that would rebuild it now refused by the false stamp.
+    """
+    (tmp_path / "train" / "001").mkdir(parents=True)
+    (tmp_path / "train" / "001" / "a.png").write_bytes(b"")
+
+    assert cyclegan.read_colour_stamp(tmp_path) == "none"
+    with pytest.raises(RuntimeError, match="necessarily 'none'"):
+        cyclegan._check_colour_stamp(tmp_path, "whiten")
+    assert not (tmp_path / cyclegan.COLOUR_STAMP).exists(), "refused, but stamped anyway"
+
+
+def test_an_unstamped_empty_dataset_is_adoptable(tmp_path):
+    """A first run must not trip over the guard meant for later ones."""
+    cyclegan._check_colour_stamp(tmp_path, "whiten")
+    assert cyclegan.read_colour_stamp(tmp_path) == "whiten"
+
+
+def test_reading_a_dataset_under_the_wrong_mode_is_refused(tmp_path):
+    """The builder's guard alone left training and evaluation free to read a
+    corrected corpus with the correction configured off, and say nothing."""
+    cyclegan._check_colour_stamp(tmp_path, "whiten")
+    cyclegan.require_colour_stamp(tmp_path, "whiten")  # matching: fine
+    with pytest.raises(RuntimeError, match="trains on one distribution"):
+        cyclegan.require_colour_stamp(tmp_path, "none")
+
+
+def test_whiten_is_NOT_idempotent_once_the_gain_clamp_binds():
+    """The precondition behind "applying it twice is free" — which is why the
+    pipeline now applies it exactly once.
+
+    The clamp is what BREAKS idempotence, not what guarantees it: a truncated
+    first pass leaves the paper un-neutral, so a second pass applies the
+    remainder and the effective limit becomes max_gain**2 = 2.56.
+    """
+    tungsten = page((248.0, 190.0, 130.0), ink=(60.0, 40.0, 30.0), ink_frac=0.05)
+    paper = colour.estimate_paper(tungsten)
+    assert paper.max() / paper.min() > 1.6, "fixture does not bind the clamp"
+
+    once = colour.whiten(tungsten)
+    twice = colour.whiten(once)
+    assert np.abs(twice - once).max() > 1.0, "clamp no longer breaks idempotence"
+
+    gain_once = once[..., 2].mean() / tungsten[..., 2].mean()
+    gain_twice = twice[..., 2].mean() / tungsten[..., 2].mean()
+    assert gain_once <= 1.61
+    assert gain_twice > 1.61, "double application no longer exceeds max_gain"
+
+
 # ── end to end through the dataset builder ────────────────────────────────────
 
 
@@ -203,10 +261,13 @@ def test_verification_split_records_the_mode_it_used(tmp_path):
 
 
 # ── the Keras side ────────────────────────────────────────────────────────────
-# Split out because these import TensorFlow, which is slow and is not needed for
-# anything above.
+# A module-scope pytest.importorskip would raise Skipped during import and abort
+# collection of this ENTIRE file, so the 20 tests above would silently vanish in
+# any environment without TensorFlow. The mark skips only what needs it.
 
-tf = pytest.importorskip("tensorflow", reason="TensorFlow not installed")
+needs_tf = pytest.mark.skipif(
+    importlib.util.find_spec("tensorflow") is None, reason="TensorFlow not installed"
+)
 
 
 def _keras_caffe(backbone):
@@ -216,6 +277,7 @@ def _keras_caffe(backbone):
     return vgg if backbone == "vgg16" else resnet
 
 
+@needs_tf
 @pytest.mark.parametrize("backbone", ["vgg16", "resnet50"])
 def test_mode_none_is_byte_identical_to_plain_keras(backbone):
     """The default path must be exactly what it was before this module existed.
@@ -228,6 +290,7 @@ def test_mode_none_is_byte_identical_to_plain_keras(backbone):
     np.testing.assert_array_equal(got, want)
 
 
+@needs_tf
 @pytest.mark.parametrize("backbone", ["vgg16", "resnet50"])
 def test_preprocess_does_not_mutate_its_input(backbone):
     """preprocess_input(mode="caffe") reverses the channel axis into a numpy
@@ -241,6 +304,7 @@ def test_preprocess_does_not_mutate_its_input(backbone):
     np.testing.assert_array_equal(img, before)
 
 
+@needs_tf
 def test_whiten_then_caffe_differs_from_caffe_alone():
     """Guards against the correction being wired in but doing nothing - the
     failure mode that made two earlier implementations no-ops."""
@@ -252,6 +316,7 @@ def test_whiten_then_caffe_differs_from_caffe_alone():
     assert np.abs(corrected - plain).max() > 1.0
 
 
+@needs_tf
 def test_rejects_an_unknown_mode():
     from signature_training.models.preprocess import extractor_preprocess
 
@@ -259,6 +324,7 @@ def test_rejects_an_unknown_mode():
         extractor_preprocess("vgg16", "sepia")
 
 
+@needs_tf
 def test_keras_hook_receives_one_hwc_image_in_0_255(tmp_path):
     """The contract extractor_preprocess is written against. If a future Keras
     batches the call or pre-scales to [0, 1], the correction silently operates
