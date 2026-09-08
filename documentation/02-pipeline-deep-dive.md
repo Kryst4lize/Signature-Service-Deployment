@@ -133,10 +133,13 @@ colour:
 |---|---|---|
 | `data-cyclegan` | `data/cyclegan.py:_make_pair` | the clean image, before noise is added, so domains A and B share a paper colour |
 | `data-verification` | `data/cyclegan.py:_copy_person` | the images written to disk, which is what the backbones read |
-| `train-verification` | `models/preprocess.py` | the Keras `preprocessing_function` hook |
-| `evaluate` | `models/preprocess.py` | the same hook, so the EER describes the pipeline that will run |
 
-### Why the correction happens twice
+Both are **dataset writers**. Nothing corrects at load time, and
+`train-verification` and `evaluate` read pixels that already carry the
+correction — each checks the dataset's recorded mode first and refuses a
+mismatch.
+
+### Why at build time, and exactly once
 
 Keras offers only a **post-augmentation** hook: `preprocessing_function` runs
 after rotation, shift, shear and zoom, so it sees the borders those fill in. The
@@ -149,14 +152,41 @@ paper band and drag the per-channel means together:
 | clean estimate | +0.00 |
 | with 10% `cval=255` fill | **+0.83** |
 
-About a tenth of the cast survives — a tenth of the reason the setting exists.
-So the correction is applied when the dataset is written, before any
-augmentation exists, and the hook stays as a second pass.
+About a tenth of the cast survives. At build time there is no augmentation and
+the estimate is clean.
 
-That is safe because **`whiten` is idempotent**. Its gain is clamped to
-`[1.0, max_gain]`, so paper that is already neutral yields exactly 1.0 and
-nothing happens. Measured residual for a second application: **0.001 levels** on
-the raw cast, **0.026** on the denoised one.
+Doing both looks free and is not. **`whiten` is idempotent only while its gain
+clamp does not bind.** The clamp is what breaks idempotence, not what guarantees
+it: when `estimate_paper(x).max() / .min()` exceeds `max_gain`, the first pass is
+truncated and leaves the paper un-neutral, so a second applies the remainder and
+the effective limit becomes `max_gain²` = 2.56 — defeating the clamp that exists
+to stop a dark photograph being stretched into white.
+
+| paper | imbalance | one pass | two passes |
+|---|---|---|---|
+| raw scan 243.3 / 251.5 / 251.5 | 1.034 | +0.00 | +0.00 (drift 0.001) |
+| denoised 250.0 / 253.4 / 253.4 | 1.014 | +0.00 | +0.00 (drift 0.026) |
+| tungsten 248 / 190 / 130 | **1.908** | blue gain 1.600× | blue gain **1.908×**, 41 levels drift |
+
+The signature corpora are nowhere near the bound, so composition happens to be
+safe on this data. It is not safe in general — which is why the serving side must
+apply it exactly once too.
+
+### The dataset stamp
+
+`data-verification` writes `.colour_mode` into the dataset directory.
+`train-verification` and `evaluate` both read it and refuse to run against a
+mismatch, because nothing else compares the two: without it, training could read
+a corrected corpus with the correction configured off and record the wrong mode
+next to the model.
+
+An **unstamped** directory that already holds people is read as `none`, and that
+is a fact rather than a guess — before the correction moved into the builder it
+was a bare `shutil.copytree`, so every dataset predating the stamp is provably
+uncorrected. Assuming otherwise was a real defect: the first `colour.mode:
+whiten` would skip every existing folder, stamp the directory `whiten`, and
+report success, leaving a +8.18 corpus certified as corrected and refusing the
+one command that would rebuild it.
 
 ### One knob, not six
 
@@ -178,10 +208,9 @@ sigtrain evaluate          --set colour.mode=whiten   # prints the new threshold
 sigtrain export
 ```
 
-`data-verification` writes a `.colour_mode` stamp into the dataset directory and
-refuses to extend a dataset built under a different mode. Without it, the
-builder's skip-if-exists behaviour would leave half the corpus under the old
-distribution and report success.
+The delete is not optional: `build_verification_split` skips person folders that
+already exist, so without it half the corpus would keep the old distribution.
+The stamp turns that into an error rather than a silent mixture.
 
 Rebuilding the **CycleGAN** pair set and retraining the denoiser is a separate,
 much longer job (200 epochs). It is the root fix — domain A then has neutral
@@ -289,9 +318,12 @@ backbones historically behaved so differently under the same recipe.
 `conv5_block3_out`, not `conv5_block3_2_conv`: the latter is mid-block, so the
 residual addition and the block's final activation are both discarded.
 
-4096 is not free to change. `inference/postgres/init.sql` declares
-`VECTOR(4096)` and each `config.pbtxt` declares `dims: [4096]`. All three move
-together.
+4096 is not free to change. The width is pinned in `inference/api/app/db.py`,
+in the migration that creates the columns
+(`inference/api/migrations/versions/0001_initial_schema.py`), and in each
+`config.pbtxt` as `dims: [4096]`. Changing `verification.embedding_dim` means
+changing all three — not `inference/postgres/init.sql`, which is now a bare
+`CREATE EXTENSION` because the schema moved to Alembic.
 
 ---
 

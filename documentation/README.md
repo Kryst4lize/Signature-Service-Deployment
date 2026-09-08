@@ -34,7 +34,7 @@ This folder covers the things that span both halves.
 ├── inference/          serves models
 │   ├── api/app/                   FastAPI service (6 modules)
 │   ├── triton/model_repository/   config.pbtxt per model
-│   ├── postgres/init.sql          schema
+│   ├── postgres/init.sql          bootstrap (CREATE EXTENSION); schema is in api/migrations/
 │   ├── frontend/index.html        web UI
 │   ├── nginx/nginx.conf           SPA + /api proxy
 │   └── tests/

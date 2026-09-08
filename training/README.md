@@ -232,21 +232,22 @@ colour:
 | stage | what it corrects |
 |---|---|
 | `data-cyclegan` | the clean image before noise, so both domains share a paper colour |
-| `data-verification` | the images written to disk |
-| `train-verification` | the Keras preprocessing hook |
-| `evaluate` | the same hook, so the EER describes the pipeline that will run |
+| `data-verification` | the images written to disk, which is what the backbones read |
+
+Both are dataset *writers*. `train-verification` and `evaluate` read pixels that
+already carry the correction, and each checks the dataset's recorded mode before
+using it.
 
 `whiten` takes the dataset cast to −0.10 and slightly improves ink/paper
-contrast. It is applied twice on purpose — at dataset-build time, where the
-estimate is clean, and again in the Keras hook, which runs *after* augmentation
-and would otherwise see the 10.9% of the frame that `cval=255` fills (measured
-residual +0.83 instead of +0.00). The second pass is free because `whiten`
-clamps its gain to `[1.0, max_gain]`, so neutral paper yields 1.0 and nothing
-happens.
+contrast. It is applied at build time rather than in the Keras hook because that
+hook runs *after* augmentation and would see the 10.9% of the frame `cval=255`
+fills, leaving +0.83 of the cast instead of +0.00. Applying it in both places is
+**not** free: `whiten` is idempotent only while its gain clamp does not bind, and
+two passes raise the effective limit to `max_gain²`.
 
-Changing the mode **invalidates the trained extractors**. Delete
-`data/processed/verification/` — the builder refuses to mix modes — then re-run
-`data-verification`, `train-verification`, `evaluate`, `export`.
+Changing the mode **invalidates the built datasets and the trained extractors**.
+Delete `data/processed/verification/` — the builder refuses to mix modes — then
+re-run `data-verification`, `train-verification`, `evaluate`, `export`.
 
 `sigtrain evaluate` prints `COLOUR_MODE=` alongside `MATCH_THRESHOLD=`. Note
 that **the service does not read `COLOUR_MODE` yet**: `settings.colour_mode` is

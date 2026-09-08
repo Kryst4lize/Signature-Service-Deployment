@@ -53,11 +53,14 @@ class ColourConfig:
     raw scans at +8.18 and served denoised crops at +3.45 — two different
     distributions, neither normalised.
 
-    `mode` is applied at every point an image enters a model, so all of them see
-    the same paper white point:
+    `mode` is applied wherever a dataset is WRITTEN, so everything downstream
+    reads one paper white point:
 
-        data/cyclegan.py     both domains of the CycleGAN pair set
-        models/preprocess.py the extractor input, at training AND evaluation
+        data/cyclegan.py:_make_pair     both domains of the CycleGAN pair set
+        data/cyclegan.py:_copy_person   the images the backbones read
+
+    Once, at build time — not in the Keras hook, which runs after augmentation
+    and would compose two clamped gains. See models/preprocess.py.
 
     The numeric parameters — paper level, max gain, strength — are deliberately
     NOT here. They live as module constants in data/colour.py, which is
@@ -65,8 +68,11 @@ class ColourConfig:
     leaves exactly one string that can disagree between the two halves instead of
     six.
 
-    Changing `mode` invalidates the trained extractors: they learn the colour
-    distribution they were fed. Re-run train-verification, evaluate, export.
+    Changing `mode` invalidates the built datasets AND the trained extractors.
+    The builders stamp each dataset with the mode it was written under and refuse
+    to extend it under another, so a change means deleting
+    data/processed/verification/ and re-running data-verification,
+    train-verification, evaluate, export.
     """
 
     # "none" | "whiten" | "desaturate"

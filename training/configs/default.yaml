@@ -30,8 +30,15 @@ paths:
   # inference service.
   triton_repository: ../inference/triton/model_repository
 
-# Paper white-balance. ONE setting, applied everywhere an image enters a model:
-# the CycleGAN pair set, verification training, and evaluation.
+# Paper white-balance. ONE setting, applied wherever a dataset is WRITTEN:
+#   data-cyclegan       both domains of the pair set (data/cyclegan.py:_make_pair)
+#   data-verification   the images the backbones read (data/cyclegan.py:_copy_person)
+#
+# Applied at build time, not at load time, and exactly once. Keras only offers a
+# post-augmentation hook, which sees the ~10.9% of the frame that rotation and
+# shift fill with cval=255; those neutral pixels bias the paper estimate and
+# leave +0.83 of the cast instead of +0.00. And whiten is idempotent only while
+# its gain clamp does not bind, so correcting twice can reach max_gain**2.
 #
 # The scans carry a measured red deficit in the paper (R 243.28 against G/B
 # 251.47, B-R = +8.18) which reads as a cyan cast. CycleGAN reproduces the
@@ -44,10 +51,16 @@ paths:
 #   whiten      per-channel gain until the paper is neutral (dataset +8.18 -> -0.10)
 #   desaturate  discard chroma entirely
 #
-# Changing this INVALIDATES the trained extractors — they learn whatever colour
-# distribution they were fed. Re-run: train-verification, evaluate, export.
-# The service's COLOUR_MODE has to be set to match; `sigtrain evaluate` prints
-# the line to paste.
+# Changing this INVALIDATES both the built datasets and the trained extractors.
+# The builders refuse to extend a dataset written under another mode, so:
+#
+#   rm -rf data/processed/verification
+#   sigtrain data-verification && sigtrain train-verification
+#   sigtrain evaluate && sigtrain export
+#
+# `sigtrain evaluate` prints the COLOUR_MODE line for inference/.env. Note the
+# service does not read it yet, so anything but `none` is a train/serve skew
+# until the serving side is wired.
 colour:
   mode: none
 
@@ -81,7 +94,7 @@ verification:
   phase2_epochs: 10
   phase1_lr: 0.001
   phase2_lr: 0.0001
-  embedding_dim: 4096     # must match VECTOR(n) in inference/postgres/init.sql
+  embedding_dim: 4096     # must match app/db.py, migration 0001, and each config.pbtxt
   seed: 42
   vgg16_weights: ""       # optional local .h5 to skip the Keras download
   resnet50_weights: ""

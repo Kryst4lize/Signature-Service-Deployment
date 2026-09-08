@@ -1,8 +1,10 @@
 # 4 — Database
 
 PostgreSQL 17 with [pgvector](https://github.com/pgvector/pgvector).
-Schema in [`../inference/postgres/init.sql`](../inference/postgres/init.sql),
-applied once by the Postgres entrypoint on first boot.
+Schema owned by [`../inference/api/migrations/`](../inference/api/migrations/)
+and applied by the `migrate` service before the API starts.
+[`init.sql`](../inference/postgres/init.sql) is bootstrap only — a single
+`CREATE EXTENSION IF NOT EXISTS vector;`, because that needs superuser.
 
 ---
 
@@ -191,25 +193,46 @@ docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 Required after any change to preprocessing or to the extractors: embeddings are
 only comparable with others produced by the same pipeline.
 
-### Re-running init.sql
+### Applying a schema change
 
-The entrypoint runs `/docker-entrypoint-initdb.d/` **only when `PGDATA` is
-empty**. Editing `init.sql` on an existing deployment does nothing. To apply it:
+Write a migration, then let the `migrate` service apply it:
 
 ```bash
-docker compose down -v      # destroys the volume and all enrolments
-docker compose up -d
+cd inference/api
+uv run alembic revision --autogenerate -m "what changed"   # review it by hand
+docker compose up migrate
 ```
 
-Or apply the DDL by hand.
+`migrate` runs `alembic upgrade head` and exits 0; the API waits on
+`service_completed_successfully`, so it never starts against a schema it does
+not expect.
 
-### No migration tool
+### Why not init.sql
 
-The schema is one table and is owned by `init.sql`. An Alembic setup used to
-live under `trainingfiles/` — `alembic.ini`, an `env.py`, and a `db_utils.py`
-modelling a `signature_records` table that contradicted this one. Nothing
-imported it and `script_location = migrations` pointed at a directory that did
-not exist, so no migration could ever run. It was removed rather than repaired.
+The Postgres entrypoint runs `/docker-entrypoint-initdb.d` **only when PGDATA is
+empty**. Editing `init.sql` on an existing deployment does nothing at all, and
+does it silently — which is the trap the previous version of this file fell
+into: it created `items`, so every later edit to it was inert on any deployment
+that had already booted once.
 
-If the schema grows enough to need migrations, they belong in `inference/`,
-next to the service that owns it.
+Creating the extension stays there because it needs superuser, which the
+entrypoint has and the application role may not. It is idempotent, and migration
+`0001` issues it too, so a database created without the file is still fine.
+
+### Migrations
+
+| | |
+|---|---|
+| `0001_initial_schema` | `items`, its columns, and `idx_items_username` |
+| `0002_ann_indexes` | the HNSW indexes over `binary_quantize(...)::bit(4096)` |
+
+An earlier Alembic setup under `trainingfiles/` — `alembic.ini`, an `env.py`,
+and a `db_utils.py` modelling a `signature_records` table that contradicted this
+one — was removed rather than repaired: nothing imported it and
+`script_location = migrations` pointed at a directory that did not exist, so no
+migration could ever have run. The current one lives in `inference/api/`, next
+to the service that owns the schema.
+
+`idx_items_username` is declared in `app/db.py` as well as in `0001`, because
+autogenerate compares against `Base.metadata` and proposed dropping an index it
+could not see.
