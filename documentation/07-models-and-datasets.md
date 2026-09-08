@@ -57,6 +57,58 @@ Six real PDFs used for end-to-end checks. Same share.
 
 ---
 
+## 1.5 Pretrained backbone weights
+
+Fetched automatically by Keras unless a local file is supplied via
+`verification.vgg16_weights` / `verification.resnet50_weights`:
+
+| File | Source |
+|---|---|
+| `vgg16_weights_tf_dim_ordering_tf_kernels.h5` (553 MB) | <https://keras.io/api/applications/vgg/#vgg16-function> |
+| `resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5` (95 MB) | <https://keras.io/api/applications/resnet/#resnet50-function> |
+
+Both are also in the share below, which is faster and avoids a ~650 MB download
+on every fresh image.
+
+## 1.6 Reference implementation
+
+The verification approach follows
+<https://github.com/amaljoseph/EndToEnd_Signature-Detection-Cleaning-Verification_System_using_YOLOv5-and-CycleGAN>
+and the paper it is based on, <https://arxiv.org/abs/2004.12104>. Useful when
+deciding whether a change is a deviation from the reference or a bug.
+
+## 1.7 TensorRT engines
+
+The share carries five `model.plan` files, so the deployment has run on the
+TensorRT backend as well as onnxruntime.
+
+**The pipeline no longer builds them.** `convert_to_trt.py` (1,886 lines) was
+removed during the refactor: its CycleGAN path was broken (wrong `state_dict`
+key prefix, so it exported a randomly-initialised generator) and the deployed
+`config.pbtxt` files all specify `backend: "onnxruntime"`. Nothing in the repo
+consumed a `.plan`.
+
+To rebuild one from an exported ONNX, `trtexec` is the supported path — no
+custom converter required:
+
+```bash
+trtexec --onnx=artifacts/onnx/vgg16_extractor.onnx \
+        --saveEngine=vgg16_extractor.plan \
+        --fp16 --shapes=input_layer:1x3x224x224
+```
+
+then place it at `<model>/1/model.plan` and change that model's `config.pbtxt`
+to `backend: "tensorrt"`. The engine is specific to the GPU and TensorRT version
+it was built on, which is the main reason it is a deployment step rather than a
+pipeline output.
+
+The pin used previously, for reproducing that environment:
+`tensorrt-cu12==10.16.1.11` (it was a commented-out line in the old
+`trainingfiles/requirements.txt`; the Dockerfile installed it separately and
+warned "Make sure tensorrt is NOT in this file").
+
+---
+
 ## 2. Download share
 
 All internally-held artefacts — trained checkpoints, exported ONNX/TensorRT,
