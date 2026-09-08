@@ -30,6 +30,27 @@ paths:
   # inference service.
   triton_repository: ../inference/triton/model_repository
 
+# Paper white-balance. ONE setting, applied everywhere an image enters a model:
+# the CycleGAN pair set, verification training, and evaluation.
+#
+# The scans carry a measured red deficit in the paper (R 243.28 against G/B
+# 251.47, B-R = +8.18) which reads as a cyan cast. CycleGAN reproduces the
+# colour distribution it is trained on, so the denoiser emits the cast too
+# (+3.45) — and the verification backbones were trained at +8.18 and served
+# +3.45. Normalising the paper at the point of entry removes that difference
+# from both sides.
+#
+#   none        leave it alone
+#   whiten      per-channel gain until the paper is neutral (dataset +8.18 -> -0.10)
+#   desaturate  discard chroma entirely
+#
+# Changing this INVALIDATES the trained extractors — they learn whatever colour
+# distribution they were fed. Re-run: train-verification, evaluate, export.
+# The service's COLOUR_MODE has to be set to match; `sigtrain evaluate` prints
+# the line to paste.
+colour:
+  mode: none
+
 cyclegan_data:
   image_size: 512
   test_ratio: 0.10
