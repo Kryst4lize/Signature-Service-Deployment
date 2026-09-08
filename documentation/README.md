@@ -18,6 +18,7 @@ This folder covers the things that span both halves.
 | 4 | [Database](./04-database.md) | Schema, migrations, vector indexing at 4096 dimensions |
 | 5 | [Operations](./05-operations.md) | Upgrades, backup, monitoring, capacity |
 | 6 | [Troubleshooting](./06-troubleshooting.md) | Symptom → cause → fix |
+| 7 | [Models & datasets](./07-models-and-datasets.md) | Where the weights, stamps and datasets live |
 
 ## Repository map
 

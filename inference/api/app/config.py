@@ -31,6 +31,22 @@ class Settings(BaseSettings):
     # YOLOv8 objectness below this is treated as "no signature on this page".
     detection_confidence: float = 0.5
 
+    # ── Colour ────────────────────────────────────────────────────────────────
+    # Paper white-balance in the EMBEDDING path: "none" | "whiten" | "desaturate".
+    #
+    # MUST MATCH training's cyclegan_data.colour_mode. The models learn whatever
+    # colour distribution they were trained on, so enabling this without
+    # retraining feeds them input they have never seen — the same class of
+    # silent train/serve skew as the Caffe preprocessing. Default "none".
+    colour_mode: str = "none"
+
+    # Whiten the base64 previews returned to the UI (page_annotated,
+    # crop_before, crop_after) ONLY. Costs nothing in model terms: it touches
+    # the pictures a human looks at, never the tensor that produces an
+    # embedding. This is the knob that fixes "the output looks blue" without
+    # retraining anything.
+    preview_whiten: bool = True
+
     # Approximate nearest-neighbour candidate count.
     #
     # 0 (default) = exact sequential scan over every enrolled signature.

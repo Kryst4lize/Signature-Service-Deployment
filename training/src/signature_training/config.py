@@ -45,6 +45,18 @@ class PathsConfig:
 @dataclass
 class CycleGANDataConfig:
     image_size: int = 512
+    # Paper white-balance applied to every image before the clean/noisy pair is
+    # written: "none" | "whiten" | "desaturate".
+    #
+    # The Kaggle scans are ~8 levels short on red in the paper, which reads as a
+    # cyan/blue cast, and CycleGAN reproduces whatever it is trained on — so the
+    # denoised output inherits it. "whiten" removes ~92% of it (measured
+    # B-R +8.18 -> +0.69) while slightly IMPROVING ink/paper contrast.
+    #
+    # MUST MATCH the inference service's COLOUR_MODE. Changing it here without
+    # changing it there reintroduces exactly the train/serve skew this codebase
+    # has already been bitten by once.
+    colour_mode: str = "none"
     test_ratio: float = 0.10
     seed: int = 42
     # Probability a given clean image also receives each noise type.

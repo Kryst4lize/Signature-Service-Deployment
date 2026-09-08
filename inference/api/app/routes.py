@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import Item, get_db
-from app.images import draw_bbox, load_pages, pil_to_b64, pil_to_tensor, tensor_to_pil
+from app.images import draw_bbox, load_pages, pil_to_tensor, preview_b64, tensor_to_pil
 from app.triton import MODEL_SIZE, YOLO_SIZE, TritonService, get_triton_service
 
 logger = logging.getLogger(__name__)
@@ -273,7 +273,7 @@ async def verify_document(
         entry["bbox"] = list(box)
         entry["confidence"] = round(confidence, 4)
         entry["page_annotated"] = draw_bbox(page_preview, [c * scale for c in box])
-        entry["crop_before"] = pil_to_b64(_preview(crop)[0])
+        entry["crop_before"] = preview_b64(_preview(crop)[0])
 
         # ── Denoise + embed ───────────────────────────────────────────────────
         try:
@@ -283,7 +283,7 @@ async def verify_document(
             logger.exception("Triton inference failed on page %d", page_idx + 1)
             raise HTTPException(status_code=502, detail=f"Triton inference error: {exc}") from exc
 
-        entry["crop_after"] = pil_to_b64(tensor_to_pil(clean))
+        entry["crop_after"] = preview_b64(tensor_to_pil(clean))
 
         # ── Nearest neighbour by cosine distance ──────────────────────────────
         match = await _nearest(db, resnet_vec, vgg_vec)
