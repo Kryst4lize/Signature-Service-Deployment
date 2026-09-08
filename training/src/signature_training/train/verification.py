@@ -21,8 +21,6 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import optimizers
-from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
-from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_preprocess
 from tensorflow.keras.callbacks import (
     EarlyStopping,
     ModelCheckpoint,
@@ -38,10 +36,9 @@ from ..models.backbones import (
     make_extractor,
     set_finetune_trainable,
 )
+from ..models.preprocess import embed_image, extractor_preprocess
 
 logger = logging.getLogger(__name__)
-
-PREPROCESS = {"vgg16": vgg_preprocess, "resnet50": resnet_preprocess}
 
 # Caffe preprocessing subtracts the ImageNet BGR mean from a [0, 255] image, so
 # white paper (255) maps to about +131/+138/+151. Filling augmentation borders
@@ -62,7 +59,7 @@ def _generators(cfg: Config, backbone: str):
     v = cfg.verification
 
     aug = ImageDataGenerator(
-        preprocessing_function=PREPROCESS[backbone],
+        preprocessing_function=extractor_preprocess(backbone, cfg.colour.mode),
         rotation_range=8,
         width_shift_range=0.10,
         height_shift_range=0.10,
@@ -194,13 +191,22 @@ def run(cfg: Config) -> dict[str, str]:
     return produced
 
 
-def embed(extractor: tf.keras.Model, image_path: str, backbone: str, size: int = 224) -> np.ndarray:
+def embed(
+    extractor: tf.keras.Model,
+    image_path: str,
+    backbone: str,
+    colour_mode: str = "none",
+    size: int = 224,
+) -> np.ndarray:
     """One image -> L2-normalised embedding, using the same preprocessing the
-    model was trained with. The inference service must match this exactly;
-    see inference/api/app/triton.py:to_caffe."""
-    img = tf.keras.preprocessing.image.load_img(image_path, target_size=(size, size))
-    arr = tf.keras.preprocessing.image.img_to_array(img)
-    arr = PREPROCESS[backbone](np.expand_dims(arr, 0))
-    vec = extractor.predict(arr, verbose=0).flatten()
-    norm = float(np.linalg.norm(vec))
-    return vec / norm if norm > 0 else vec
+    model was trained with.
+
+    `colour_mode` is not optional in spirit: pass `cfg.colour.mode`. It defaults
+    to "none" only so that a caller holding a model trained without colour
+    correction gets the matching behaviour by default rather than silently the
+    wrong one.
+
+    The inference service must match this exactly; see
+    inference/api/app/triton.py:to_caffe.
+    """
+    return embed_image(extractor, image_path, backbone, colour_mode, size)

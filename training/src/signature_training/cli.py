@@ -118,6 +118,9 @@ def stage_evaluate(cfg: Config, args) -> None:
         print(f"  # {r['name']}: EER {r['eer']:.4f}")
     best = min(results, key=lambda r: r["eer"])
     print(f"  MATCH_THRESHOLD={best['match_threshold_for_service']:.4f}   # from {best['name']}")
+    # Printed rather than left to memory. The threshold above was measured with
+    # this colour mode, and is only valid for a service that applies the same one.
+    print(f"  COLOUR_MODE={cfg.colour.mode}")
 
 
 def stage_export(cfg: Config, args) -> None:

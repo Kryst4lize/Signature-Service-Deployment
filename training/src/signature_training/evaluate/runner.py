@@ -19,6 +19,7 @@ import numpy as np
 from sklearn.metrics import auc, roc_curve
 
 from ..config import Config
+from ..models.preprocess import embed_image
 from . import metrics, pairs, plots
 
 logger = logging.getLogger(__name__)
@@ -26,21 +27,17 @@ logger = logging.getLogger(__name__)
 BACKBONES = ("vgg16", "resnet50")
 
 
-def _embedder(extractor, backbone: str, size: int):
-    """Image path -> L2-normalised embedding, matching training preprocessing."""
-    import numpy as np
-    from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_pp
-    from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_pp
-    from tensorflow.keras.preprocessing import image as keras_image
+def _embedder(extractor, backbone: str, size: int, colour_mode: str):
+    """Image path -> L2-normalised embedding, matching training preprocessing.
 
-    preprocess = vgg_pp if backbone == "vgg16" else resnet_pp
+    Via `models.preprocess` rather than a local copy. An evaluation that
+    preprocessed differently from training would report an EER for a pipeline
+    nobody runs — and the threshold it prints is copied straight into the
+    service, so the error would land in production wearing a measured number.
+    """
 
     def embed(path: Path) -> np.ndarray:
-        img = keras_image.load_img(str(path), target_size=(size, size))
-        arr = preprocess(np.expand_dims(keras_image.img_to_array(img), 0))
-        vec = extractor.predict(arr, verbose=0).flatten()
-        norm = float(np.linalg.norm(vec))
-        return vec / norm if norm > 0 else vec
+        return embed_image(extractor, path, backbone, colour_mode, size)
 
     return embed
 
@@ -54,7 +51,7 @@ def evaluate_one(cfg: Config, backbone: str, extractor_path: Path, test_dir: Pat
 
     scores, labels = pairs.build(
         test_dir,
-        _embedder(extractor, backbone, cfg.evaluate.image_size),
+        _embedder(extractor, backbone, cfg.evaluate.image_size, cfg.colour.mode),
         impostor_pairs_per_couple=cfg.evaluate.impostor_pairs_per_couple,
         seed=cfg.evaluate.seed,
     )
@@ -76,6 +73,9 @@ def evaluate_one(cfg: Config, backbone: str, extractor_path: Path, test_dir: Pat
 
     result = {
         "name": backbone,
+        # Recorded because the EER, and therefore the threshold the service is
+        # told to use, is only valid for the colour mode it was measured under.
+        "colour_mode": cfg.colour.mode,
         "eer": eer,
         "eer_threshold": eer_threshold,
         "match_threshold_for_service": 1.0 - eer_threshold,
