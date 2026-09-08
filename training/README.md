@@ -63,11 +63,14 @@ training/
 │   ├── config.py               YAML + --set overrides
 │   ├── paths.py                package-relative asset resolution
 │   ├── data/
-│   │   ├── cyclegan.py         dataset builders
+│   │   ├── cyclegan.py         dataset builders + the .colour_mode stamp
+│   │   ├── colour.py           paper white-balance (mirrored into inference/)
 │   │   └── noise/
 │   │       ├── document.py     form rules, cell borders, caption text
 │   │       └── stamps.py       DPI-aware seal compositing
-│   ├── models/backbones.py     VGG16 / ResNet50 + extractor truncation
+│   ├── models/
+│   │   ├── backbones.py        VGG16 / ResNet50 + extractor truncation
+│   │   └── preprocess.py       the one extractor-input path (colour, then caffe)
 │   ├── train/
 │   │   ├── verification.py     two-phase fine-tune
 │   │   └── cyclegan.py         wraps the upstream repo
@@ -184,9 +187,9 @@ sigtrain --set verification.batch_size=16 train-verification
 |---|---|---|
 | `setup` | Clones the CycleGAN repo; validates the data layout | `external/pytorch-CycleGAN-and-pix2pix/` |
 | `data-cyclegan` | Pads to a square, optionally white-balances the paper, synthesises form rules, captions and stamps | `data/processed/cyclegan/{train,test}{A,B}/` |
-| `data-verification` | Copies genuine-only person folders | `data/processed/verification/{train,test}/` |
+| `data-verification` | Copies genuine-only person folders, white-balancing the paper on the way in; stamps the dataset with the mode used | `data/processed/verification/{train,test}/` |
 | `train-cyclegan` | Runs upstream `train.py` with config-derived arguments | `artifacts/cyclegan/signature/latest_net_G_{A,B}.pth` |
-| `train-verification` | Two-phase fine-tune, then truncates at `fc1` | `artifacts/models/*_extractor.keras` |
+| `train-verification` | Checks the dataset's colour stamp, two-phase fine-tune, then truncates at `fc1` | `artifacts/models/*_extractor.keras` |
 | `evaluate` | Genuine/impostor pairs over held-out identities | `artifacts/evaluation/{*.png,metrics.json}` |
 | `export` | ONNX + `config.pbtxt`, staged into the service | `../inference/triton/model_repository/` |
 
