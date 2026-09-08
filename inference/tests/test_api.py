@@ -4,12 +4,20 @@ Triton is faked (no GPU in CI); Postgres is real, because the parts most worth
 testing here — the pgvector cast, the cosine ordering, the VARCHAR(50) limit —
 have no meaningful in-memory equivalent.
 
-Set TEST_DATABASE_URL to run these, e.g.
+`make test-integration` is the supported way to run these; it provisions a
+throwaway pgvector, applies the migrations and sets TEST_DATABASE_URL.
+
+By hand, the migration step is not optional — mounting init.sql is not enough.
+It stopped creating `items` when the schema moved to Alembic, so the recipe
+below without the `alembic upgrade head` line leaves a database with the
+extension, no table, and every test failing on UndefinedTableError:
 
     docker run -d --name sigtest_pg -p 55432:5432 \
         -e POSTGRES_PASSWORD=test -e POSTGRES_DB=sig -e POSTGRES_USER=sig \
         -v "$PWD/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
         pgvector/pgvector:pg17
+    (cd api && POSTGRES_HOST=localhost POSTGRES_PORT=55432 POSTGRES_DB=sig \
+        POSTGRES_USER=sig POSTGRES_PASSWORD=test uv run alembic upgrade head)
     TEST_DATABASE_URL=postgresql+asyncpg://sig:test@localhost:55432/sig pytest
 """
 

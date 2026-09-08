@@ -43,20 +43,45 @@ class PathsConfig:
 
 
 @dataclass
+class ColourConfig:
+    """Paper white-balance, for the whole pipeline.
+
+    ONE field on purpose. The Kaggle scans are ~8 levels short on red in the
+    paper (R 243.28 against G/B 251.47), which reads as a cyan cast; CycleGAN
+    reproduces whatever colour distribution it is trained on, so the denoiser
+    emits the cast too (+3.45). The verification backbones were then trained on
+    raw scans at +8.18 and served denoised crops at +3.45 — two different
+    distributions, neither normalised.
+
+    `mode` is applied wherever a dataset is WRITTEN, so everything downstream
+    reads one paper white point:
+
+        data/cyclegan.py:_make_pair     both domains of the CycleGAN pair set
+        data/cyclegan.py:_copy_person   the images the backbones read
+
+    Once, at build time — not in the Keras hook, which runs after augmentation
+    and would compose two clamped gains. See models/preprocess.py.
+
+    The numeric parameters — paper level, max gain, strength — are deliberately
+    NOT here. They live as module constants in data/colour.py, which is
+    byte-identical to the inference service's copy and kept that way by CI. That
+    leaves exactly one string that can disagree between the two halves instead of
+    six.
+
+    Changing `mode` invalidates the built datasets AND the trained extractors.
+    The builders stamp each dataset with the mode it was written under and refuse
+    to extend it under another, so a change means deleting
+    data/processed/verification/ and re-running data-verification,
+    train-verification, evaluate, export.
+    """
+
+    # "none" | "whiten" | "desaturate"
+    mode: str = "none"
+
+
+@dataclass
 class CycleGANDataConfig:
     image_size: int = 512
-    # Paper white-balance applied to every image before the clean/noisy pair is
-    # written: "none" | "whiten" | "desaturate".
-    #
-    # The Kaggle scans are ~8 levels short on red in the paper, which reads as a
-    # cyan/blue cast, and CycleGAN reproduces whatever it is trained on — so the
-    # denoised output inherits it. "whiten" removes ~92% of it (measured
-    # B-R +8.18 -> +0.69) while slightly IMPROVING ink/paper contrast.
-    #
-    # MUST MATCH the inference service's COLOUR_MODE. Changing it here without
-    # changing it there reintroduces exactly the train/serve skew this codebase
-    # has already been bitten by once.
-    colour_mode: str = "none"
     test_ratio: float = 0.10
     seed: int = 42
     # Probability a given clean image also receives each noise type.
@@ -115,6 +140,7 @@ class ExportConfig:
 @dataclass
 class Config:
     paths: PathsConfig = field(default_factory=PathsConfig)
+    colour: ColourConfig = field(default_factory=ColourConfig)
     cyclegan_data: CycleGANDataConfig = field(default_factory=CycleGANDataConfig)
     cyclegan_train: CycleGANTrainConfig = field(default_factory=CycleGANTrainConfig)
     verification: VerificationTrainConfig = field(default_factory=VerificationTrainConfig)
@@ -136,6 +162,7 @@ class Config:
 
         cfg = cls(
             paths=_build(PathsConfig, data.get("paths")),
+            colour=_build(ColourConfig, data.get("colour")),
             cyclegan_data=_build(CycleGANDataConfig, data.get("cyclegan_data")),
             cyclegan_train=_build(CycleGANTrainConfig, data.get("cyclegan_train")),
             verification=_build(VerificationTrainConfig, data.get("verification")),
@@ -178,14 +205,35 @@ class Config:
             yaml.safe_dump(self.to_dict(), fh, sort_keys=False)
 
 
+# Keys that used to exist, and where they went. A config file written against an
+# older revision then fails with the new name rather than with a bare "unknown
+# key", which is the difference between a one-line edit and an afternoon.
+_MOVED = {
+    ("CycleGANDataConfig", "colour_mode"): (
+        "colour.mode — the setting now governs the extractor input as well as "
+        "the CycleGAN pair set, so it is no longer specific to cyclegan_data"
+    ),
+}
+
+
 def _build(cls, data: dict[str, Any] | None):
     if not data:
         return cls()
     known = {f.name for f in dataclasses.fields(cls)}
     unknown = set(data) - known
     if unknown:
+        moved = [
+            f"  {key!r} moved to {_MOVED[(cls.__name__, key)]}"
+            for key in sorted(unknown)
+            if (cls.__name__, key) in _MOVED
+        ]
         raise ValueError(
-            f"Unknown key(s) {sorted(unknown)} in config section {cls.__name__}. "
-            f"Valid keys: {sorted(known)}"
+            "\n".join(
+                [
+                    f"Unknown key(s) {sorted(unknown)} in config section {cls.__name__}.",
+                    *moved,
+                    f"Valid keys: {sorted(known)}",
+                ]
+            )
         )
     return cls(**data)

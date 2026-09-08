@@ -29,8 +29,10 @@ serves.
 
 ### Why the extractors are the subtle one
 
-`ImageDataGenerator(preprocessing_function=preprocess_input)` applies the
-transform *before* the model sees anything. No `Rescaling` or `Normalization`
+`ImageDataGenerator(preprocessing_function=...)` applies the transform *before*
+the model sees anything — today via
+`models/preprocess.py:extractor_preprocess`, which composes the colour
+correction with Keras' `preprocess_input`. No `Rescaling` or `Normalization`
 layer is ever added to the graph. So the saved `.keras` model — and therefore
 the exported ONNX — begins at `Conv1` on an **already-preprocessed** tensor.
 
@@ -49,8 +51,13 @@ TensorFlow 2.21 — maximum absolute difference `0.000e+00` for both backbones.
 ### If you change preprocessing
 
 Change it in both halves and update the tests. Training-side preprocessing is
-in `training/src/signature_training/train/verification.py`; serving-side is
-`to_caffe` / `to_cyclegan` / `from_cyclegan`.
+`training/src/signature_training/models/preprocess.py`, which is the single path
+used by training and evaluation alike; serving-side is `to_caffe` /
+`to_cyclegan` / `from_cyclegan` in `inference/api/app/triton.py`.
+
+`preprocess_input(mode="caffe")` **mutates its argument**: it reverses the
+channel axis into a numpy view and subtracts the mean in place. Anything that
+reuses the array afterwards needs a copy first.
 
 ---
 
@@ -112,21 +119,131 @@ Measured after those two fixes:
 
 Ink/paper contrast goes *up* slightly (153.2 → 155.8), so strokes are not eroded.
 
-### What to actually do
+---
 
-The root fix is upstream: set `cyclegan_data.colour_mode: whiten`, rebuild the
-CycleGAN dataset and retrain. Domain A then has neutral paper and the generator
-stops emitting a cast at all — which is why the residual on the current model
-(+1.75) cannot be driven to zero from the outside: post-hoc correction is
-undoing something the weights already baked in, against a saturating ceiling.
+## The colour contract
 
-Until then, `PREVIEW_WHITEN=true` (the default) neutralises the previews the UI
-shows without touching the tensor that produces an embedding. That fixes the
-visible symptom at zero model risk.
+One setting, `colour.mode` in `training/configs/default.yaml`, applied at every
+point an image enters a model:
 
-`COLOUR_MODE` applies the correction in the embedding path and **must match
-`cyclegan_data.colour_mode`**. Turning it on alone reintroduces exactly the
-train/serve skew this pipeline has already been bitten by once.
+```yaml
+colour:
+  mode: none        # none | whiten | desaturate
+```
+
+| stage | where | what it corrects |
+|---|---|---|
+| `data-cyclegan` | `data/cyclegan.py:_make_pair` | the clean image, before noise is added, so domains A and B share a paper colour |
+| `data-verification` | `data/cyclegan.py:_copy_person` | the images written to disk, which is what the backbones read |
+
+Both are **dataset writers**. Nothing corrects at load time, and
+`train-verification` and `evaluate` read pixels that already carry the
+correction — each checks the dataset's recorded mode first and refuses a
+mismatch.
+
+### Why at build time, and exactly once
+
+Keras offers only a **post-augmentation** hook: `preprocessing_function` runs
+after rotation, shift, shear and zoom, so it sees the borders those fill in. The
+configured augmentation fills a mean of **10.8%** of the frame with `cval=255`
+(p95 17.8%, over 5,000 draws; stable to 0.2 points across independent seeds).
+Those neutral pixels land inside the paper band and drag the per-channel means
+together:
+
+| | residual cast after `whiten` |
+|---|---|
+| clean estimate | +0.00 |
+| with 10% `cval=255` fill | **+0.83** |
+
+About a tenth of the cast survives. At build time there is no augmentation and
+the estimate is clean.
+
+Doing both looks free and is not. **`whiten` is idempotent only while its gain
+clamp does not bind.** The clamp is what breaks idempotence, not what guarantees
+it: when `estimate_paper(x).max() / .min()` exceeds `max_gain`, the first pass is
+truncated and leaves the paper un-neutral, so a second applies the remainder and
+the effective limit becomes `max_gain²` = 2.56 — defeating the clamp that exists
+to stop a dark photograph being stretched into white.
+
+| paper | imbalance | one pass | two passes |
+|---|---|---|---|
+| raw scan 243.3 / 251.5 / 251.5 | 1.034 | +0.00 | +0.00 (drift 0.001) |
+| denoised 250.0 / 253.4 / 253.4 | 1.014 | +0.00 | +0.00 (drift 0.026) |
+| tungsten 248 / 190 / 130 | **1.908** | blue gain 1.600× | blue gain **1.908×**, 41 levels drift |
+
+The signature corpora are nowhere near the bound, so composition happens to be
+safe on this data. It is not safe in general — which is why the serving side must
+apply it exactly once too.
+
+### The dataset stamp
+
+`data-verification` writes `.colour_mode` into the dataset directory.
+`train-verification` and `evaluate` both read it and refuse to run against a
+mismatch, because nothing else compares the two: without it, training could read
+a corrected corpus with the correction configured off and record the wrong mode
+next to the model.
+
+An **unstamped** directory that already holds people is read as `none`, and that
+is a fact rather than a guess — before the correction moved into the builder it
+was a bare `shutil.copytree`, so every dataset predating the stamp is provably
+uncorrected. Assuming otherwise was a real defect: the first `colour.mode:
+whiten` would skip every existing folder, stamp the directory `whiten`, and
+report success, leaving a +8.18 corpus certified as corrected and refusing the
+one command that would rebuild it.
+
+### One knob, not six
+
+`paper_level`, `max_gain`, `strength` and `lift` are deliberately *not* config
+keys. They are module constants in `colour.py`, whose two copies are identical
+from the `from __future__` line onward — the module docstrings differ, and the
+CI diff compares exactly that region. That leaves exactly one string
+that can disagree between training and serving instead of six.
+
+### Changing the mode
+
+It **invalidates the trained extractors** — they learn whatever colour
+distribution they were fed. In order:
+
+```bash
+rm -rf training/data/processed/verification   # the builder refuses to mix modes
+sigtrain data-verification --set colour.mode=whiten
+sigtrain train-verification --set colour.mode=whiten
+sigtrain evaluate          --set colour.mode=whiten   # prints the new threshold
+sigtrain export
+```
+
+The delete is not optional: `build_verification_split` skips person folders that
+already exist, so without it half the corpus would keep the old distribution.
+The stamp turns that into an error rather than a silent mixture.
+
+Rebuilding the **CycleGAN** pair set and retraining the denoiser is a separate,
+much longer job (200 epochs). It is the root fix — domain A then has neutral
+paper and the generator stops emitting a cast at all — and it is why the
+residual on the *current* weights (+1.75) cannot be driven to zero from the
+outside: post-hoc correction is undoing something the weights already baked in,
+against a saturating ceiling.
+
+### The serving side is not wired yet
+
+`sigtrain evaluate` prints the line to paste:
+
+```
+MATCH_THRESHOLD=0.3012   # from resnet50
+COLOUR_MODE=whiten
+```
+
+**But nothing in the service reads `COLOUR_MODE` today.** `settings.colour_mode`
+is declared in `inference/api/app/config.py` and no code consumes it; the
+correction has to be applied to the `[0, 1]` RGB tensor immediately before
+`to_caffe` in `inference/api/app/triton.py`, and that call does not exist. Until
+it does, setting `colour.mode` to anything but `none` produces a **train/serve
+skew** — the models are trained on normalised paper and served un-normalised
+paper.
+
+`PREVIEW_WHITEN=true` (the default) is a different thing and does work: it
+neutralises the base64 previews the UI shows, touching what a human sees and
+nothing that produces an embedding. That fixes "the output looks blue" at zero
+model risk.
 
 `desaturate` is the stronger option: a signature's identity is stroke geometry,
 not colour, so discarding chroma removes this cast and every other
@@ -205,9 +322,12 @@ backbones historically behaved so differently under the same recipe.
 `conv5_block3_out`, not `conv5_block3_2_conv`: the latter is mid-block, so the
 residual addition and the block's final activation are both discarded.
 
-4096 is not free to change. `inference/postgres/init.sql` declares
-`VECTOR(4096)` and each `config.pbtxt` declares `dims: [4096]`. All three move
-together.
+4096 is not free to change. The width is pinned in `inference/api/app/db.py`,
+in the migration that creates the columns
+(`inference/api/migrations/versions/0001_initial_schema.py`), and in each
+`config.pbtxt` as `dims: [4096]`. Changing `verification.embedding_dim` means
+changing all three — not `inference/postgres/init.sql`, which is now a bare
+`CREATE EXTENSION` because the schema moved to Alembic.
 
 ---
 
@@ -283,3 +403,7 @@ MATCH_THRESHOLD = 1 - eer_threshold
 
 The runner prints the converted value directly, because getting this inversion
 wrong produces a system that looks configured and accepts everyone.
+
+It prints `COLOUR_MODE=` on the next line. The threshold is only valid for the
+colour mode it was measured under, so the two belong together — see
+[the colour contract](#the-colour-contract).

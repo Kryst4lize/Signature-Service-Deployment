@@ -107,7 +107,7 @@ def build(cfg: Config) -> dict[str, int]:
         for path in tqdm(items, desc=f"  {split}", unit="img"):
             try:
                 clean, noisy = _make_pair(
-                    path, document, stamper, data_cfg.image_size, data_cfg.colour_mode
+                    path, document, stamper, data_cfg.image_size, cfg.colour.mode
                 )
             except Exception as exc:
                 failures.append((path, str(exc)))
@@ -163,6 +163,123 @@ def _make_pair(
     return clean, noisy
 
 
+COLOUR_STAMP = ".colour_mode"
+
+
+def read_colour_stamp(dataset: Path) -> str:
+    """The colour mode the dataset on disk was written under.
+
+    An unstamped directory that already holds people is `none`, and that is a
+    fact rather than an assumption: before the correction moved into this
+    builder it was a bare `shutil.copytree`, so every dataset predating the
+    stamp is provably uncorrected.
+
+    An unstamped EMPTY directory has no content to describe, so it reports
+    whatever the caller is about to write.
+    """
+    stamp = dataset / COLOUR_STAMP
+    if stamp.is_file():
+        return stamp.read_text().strip()
+    return "none" if any(dataset.glob("*/*/")) else ""
+
+
+def _check_colour_stamp(dataset: Path, mode: str) -> None:
+    """Refuse to extend a dataset that was written under a different colour mode.
+
+    `build_verification_split` skips person folders that already exist, so
+    without this a run that changed `colour.mode` would leave the previously
+    written folders uncorrected and report success. The result trains on a
+    mixture of two colour distributions — the exact defect this setting exists
+    to remove, made invisible by an incremental build.
+
+    The unstamped case is the one that matters, and an earlier version of this
+    function got it backwards. It assumed an unstamped dataset matched whatever
+    the current run wanted, which is wrong in precisely the situation the guard
+    exists for: the first time anyone sets `colour.mode: whiten`, every existing
+    dataset is unstamped and uncorrected. The guard would skip every folder,
+    write a stamp asserting `whiten`, log "assuming colour.mode='whiten'" as
+    though it had checked, and return full counts — training then ran on a
+    +8.18 corpus certified as corrected, and the one command that would have
+    fixed it (`mode=none`) was now refused by the false stamp.
+
+    Read-only. Recording the mode is `_write_colour_stamp`, and it happens after
+    a build succeeds rather than before it starts: creating the directory and
+    stamping it up front meant a run that failed on a mistyped `raw_signatures`
+    left behind an empty stamped directory, which then refused every later mode
+    change — claiming to hold images written under a mode, having written none.
+    """
+    previous = read_colour_stamp(dataset)
+    if previous and previous != mode:
+        raise RuntimeError(
+            f"{dataset} holds images written with colour.mode={previous!r}, but this "
+            f"run has colour.mode={mode!r}. Existing person folders are skipped, so "
+            f"continuing would mix two colour distributions in one dataset.\n"
+            f"Delete {dataset} and re-run `sigtrain data-verification`."
+            + (
+                f"\n(There is no {COLOUR_STAMP} file. The directory predates it, and "
+                f"the builder did not correct colour at all back then, so its contents "
+                f"are necessarily {previous!r}.)"
+                if not (dataset / COLOUR_STAMP).is_file()
+                else ""
+            )
+        )
+
+
+def _write_colour_stamp(dataset: Path, mode: str) -> None:
+    """Record the mode, once there is something for it to describe."""
+    dataset.mkdir(parents=True, exist_ok=True)
+    (dataset / COLOUR_STAMP).write_text(f"{mode}\n")
+
+
+def require_colour_stamp(dataset: Path, mode: str) -> None:
+    """Assert that a dataset about to be READ carries the configured mode.
+
+    The builder's guard alone left a gap: nothing outside this module consulted
+    the stamp, so `sigtrain train-verification` would happily train on a
+    corrected corpus with the correction configured off, or the reverse, and say
+    nothing. Both produce a model whose colour distribution is not the one
+    recorded next to it.
+    """
+    previous = read_colour_stamp(dataset)
+    if previous and previous != mode:
+        raise RuntimeError(
+            f"{dataset} was built with colour.mode={previous!r}, but this run has "
+            f"colour.mode={mode!r}. The images on disk carry the correction; "
+            f"re-running with a mismatched setting trains on one distribution while "
+            f"recording another.\n"
+            f"Either set colour.mode={previous!r}, or delete {dataset} and re-run "
+            f"`sigtrain data-verification`."
+        )
+
+
+def _copy_person(folder: Path, target: Path, colour_mode: str) -> None:
+    """Materialise one person's folder in the verification dataset.
+
+    A plain copy when no colour correction is configured, and a re-encode when
+    there is. Correcting HERE rather than only in the Keras
+    `preprocessing_function` is deliberate: Keras runs that hook AFTER
+    augmentation, so it sees the borders rotation and shift fill in with
+    `cval=255`. Those neutral pixels sit inside the paper band and pull the
+    per-channel means together, weakening the very correction being applied — at
+    the mean 10.8% fill that augmentation produces, the dataset cast comes out at
+    +0.83 instead of +0.00. At build time there is no augmentation and the
+    estimate is clean.
+    """
+    import shutil
+
+    if colour_mode == "none":
+        shutil.copytree(folder, target)
+        return
+
+    target.mkdir(parents=True, exist_ok=True)
+    for image in sorted(p for p in folder.iterdir() if p.suffix.lower() in VALID_EXTS):
+        src = cv2.imread(str(image), cv2.IMREAD_COLOR)
+        if src is None:  # not decodable as an image; copy it through untouched
+            shutil.copy2(image, target / image.name)
+            continue
+        cv2.imwrite(str(target / image.name), colour.apply(src, colour_mode).astype(np.uint8))
+
+
 def build_verification_split(cfg: Config) -> dict[str, int]:
     """Copy only genuine (non-`_forg`) person folders into the verification
     dataset, preserving the train/test split.
@@ -170,12 +287,16 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
     Kept separate from the CycleGAN builder because the two want opposite
     things: CycleGAN needs clean images to corrupt, verification needs
     per-person folders to classify.
-    """
-    import shutil
 
+    `colour.mode` is applied on the way in, so what is on disk is exactly what
+    the backbones train on.
+    """
     src = cfg.paths.resolve("raw_signatures")
     dst = cfg.paths.resolve("verification_dataset")
     counts = {}
+    _check_colour_stamp(dst, cfg.colour.mode)
+    if cfg.colour.mode != "none":
+        logger.info("Applying colour mode %r while writing %s", cfg.colour.mode, dst)
 
     for split in ("train", "test"):
         src_split, dst_split = src / split, dst / split
@@ -193,7 +314,7 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
             if target.exists():
                 existing += 1
             else:
-                shutil.copytree(folder, target)
+                _copy_person(folder, target, cfg.colour.mode)
                 copied += 1
         # Count what is PRESENT, not what this run copied. Counting only copies
         # made every re-run look like an empty dataset and abort the stage — so
@@ -212,4 +333,6 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
             f"No genuine person folders found under {src}. Expected "
             f"{src}/train/<person>/ directories not ending in '_forg'."
         )
+    # Only now, with images actually on disk for it to describe.
+    _write_colour_stamp(dst, cfg.colour.mode)
     return counts

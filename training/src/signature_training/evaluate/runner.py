@@ -19,6 +19,8 @@ import numpy as np
 from sklearn.metrics import auc, roc_curve
 
 from ..config import Config
+from ..data.cyclegan import require_colour_stamp
+from ..models.preprocess import embed_image
 from . import metrics, pairs, plots
 
 logger = logging.getLogger(__name__)
@@ -27,20 +29,19 @@ BACKBONES = ("vgg16", "resnet50")
 
 
 def _embedder(extractor, backbone: str, size: int):
-    """Image path -> L2-normalised embedding, matching training preprocessing."""
-    import numpy as np
-    from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_pp
-    from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_pp
-    from tensorflow.keras.preprocessing import image as keras_image
+    """Image path -> L2-normalised embedding, matching training preprocessing.
 
-    preprocess = vgg_pp if backbone == "vgg16" else resnet_pp
+    Via `models.preprocess` rather than a local copy. An evaluation that
+    preprocessed differently from training would report an EER for a pipeline
+    nobody runs — and the threshold it prints is copied straight into the
+    service, so the error would land in production wearing a measured number.
+
+    No colour mode: these images come from `paths.verification_dataset`, which
+    is written already corrected, and `evaluate_one` has checked the stamp.
+    """
 
     def embed(path: Path) -> np.ndarray:
-        img = keras_image.load_img(str(path), target_size=(size, size))
-        arr = preprocess(np.expand_dims(keras_image.img_to_array(img), 0))
-        vec = extractor.predict(arr, verbose=0).flatten()
-        norm = float(np.linalg.norm(vec))
-        return vec / norm if norm > 0 else vec
+        return embed_image(extractor, path, backbone, "none", size)
 
     return embed
 
@@ -76,6 +77,9 @@ def evaluate_one(cfg: Config, backbone: str, extractor_path: Path, test_dir: Pat
 
     result = {
         "name": backbone,
+        # Recorded because the EER, and therefore the threshold the service is
+        # told to use, is only valid for the colour mode it was measured under.
+        "colour_mode": cfg.colour.mode,
         "eer": eer,
         "eer_threshold": eer_threshold,
         "match_threshold_for_service": 1.0 - eer_threshold,
@@ -136,9 +140,12 @@ def _report(r: dict, tar: dict, fnmr: dict, genuine: np.ndarray, impostor: np.nd
 
 def run(cfg: Config) -> list[dict]:
     models_dir = cfg.paths.resolve("models")
-    test_dir = cfg.paths.resolve("verification_dataset") / "test"
+    dataset = cfg.paths.resolve("verification_dataset")
+    test_dir = dataset / "test"
     if not test_dir.is_dir():
         raise FileNotFoundError(f"{test_dir} not found. Run `sigtrain data-verification` first.")
+    # The EER is only meaningful for the colour distribution on disk.
+    require_colour_stamp(dataset, cfg.colour.mode)
 
     out_dir = cfg.paths.resolve("evaluation")
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -77,7 +77,11 @@ def preview_b64(img: Image.Image, fmt: str = "PNG") -> str:
     which reads as a cyan/blue tint, and the denoiser reproduces it — so the
     pictures returned to the operator look blue even when the embedding is
     fine. Correcting here changes what a human sees and nothing the model
-    touches. See settings.colour_mode for the version that does.
+    touches.
+
+    There is no embedding-path equivalent yet: settings.colour_mode is declared
+    and unread. See training/src/signature_training/models/preprocess.py for the
+    contract the serving side has to meet when it is wired.
     """
     if not settings.preview_whiten:
         return pil_to_b64(img, fmt)
