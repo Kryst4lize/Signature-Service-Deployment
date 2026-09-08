@@ -107,7 +107,7 @@ def build(cfg: Config) -> dict[str, int]:
         for path in tqdm(items, desc=f"  {split}", unit="img"):
             try:
                 clean, noisy = _make_pair(
-                    path, document, stamper, data_cfg.image_size, data_cfg.colour_mode
+                    path, document, stamper, data_cfg.image_size, cfg.colour.mode
                 )
             except Exception as exc:
                 failures.append((path, str(exc)))
@@ -163,6 +163,68 @@ def _make_pair(
     return clean, noisy
 
 
+COLOUR_STAMP = ".colour_mode"
+
+
+def _check_colour_stamp(dataset: Path, mode: str) -> None:
+    """Refuse to extend a dataset that was written under a different colour mode.
+
+    `build_verification_split` skips person folders that already exist, so
+    without this a run that changed `colour.mode` would leave the previously
+    written folders uncorrected and report success. The result trains on a
+    mixture of two colour distributions — the exact defect this setting exists
+    to remove, made invisible by an incremental build.
+    """
+    stamp = dataset / COLOUR_STAMP
+    if stamp.is_file():
+        previous = stamp.read_text().strip()
+        if previous != mode:
+            raise RuntimeError(
+                f"{dataset} was built with colour.mode={previous!r}, but this run "
+                f"has colour.mode={mode!r}. Existing person folders are skipped, so "
+                f"continuing would mix two colour distributions in one dataset.\n"
+                f"Delete {dataset} and re-run `sigtrain data-verification`."
+            )
+        return
+    if any(dataset.glob("*/*/")):  # pre-dates the stamp; assume it matches
+        logger.warning(
+            "%s has no %s. It was built before the colour contract existed; "
+            "assuming colour.mode=%r. Delete and rebuild if that is wrong.",
+            dataset,
+            COLOUR_STAMP,
+            mode,
+        )
+    dataset.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(f"{mode}\n")
+
+
+def _copy_person(folder: Path, target: Path, colour_mode: str) -> None:
+    """Materialise one person's folder in the verification dataset.
+
+    A plain copy when no colour correction is configured, and a re-encode when
+    there is. Correcting HERE rather than only in the Keras
+    `preprocessing_function` is deliberate: Keras runs that hook AFTER
+    augmentation, so it sees the borders rotation and shift fill in with
+    `cval=255`. Those neutral pixels sit inside the paper band and pull the
+    per-channel means together, weakening the very correction being applied —
+    measured at a mean 10.9% fill, the dataset cast comes out at +0.83 instead
+    of +0.00. At build time there is no augmentation and the estimate is clean.
+    """
+    import shutil
+
+    if colour_mode == "none":
+        shutil.copytree(folder, target)
+        return
+
+    target.mkdir(parents=True, exist_ok=True)
+    for image in sorted(p for p in folder.iterdir() if p.suffix.lower() in VALID_EXTS):
+        src = cv2.imread(str(image), cv2.IMREAD_COLOR)
+        if src is None:  # not decodable as an image; copy it through untouched
+            shutil.copy2(image, target / image.name)
+            continue
+        cv2.imwrite(str(target / image.name), colour.apply(src, colour_mode).astype(np.uint8))
+
+
 def build_verification_split(cfg: Config) -> dict[str, int]:
     """Copy only genuine (non-`_forg`) person folders into the verification
     dataset, preserving the train/test split.
@@ -170,12 +232,16 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
     Kept separate from the CycleGAN builder because the two want opposite
     things: CycleGAN needs clean images to corrupt, verification needs
     per-person folders to classify.
-    """
-    import shutil
 
+    `colour.mode` is applied on the way in, so what is on disk is exactly what
+    the backbones train on.
+    """
     src = cfg.paths.resolve("raw_signatures")
     dst = cfg.paths.resolve("verification_dataset")
     counts = {}
+    _check_colour_stamp(dst, cfg.colour.mode)
+    if cfg.colour.mode != "none":
+        logger.info("Applying colour mode %r while writing %s", cfg.colour.mode, dst)
 
     for split in ("train", "test"):
         src_split, dst_split = src / split, dst / split
@@ -193,7 +259,7 @@ def build_verification_split(cfg: Config) -> dict[str, int]:
             if target.exists():
                 existing += 1
             else:
-                shutil.copytree(folder, target)
+                _copy_person(folder, target, cfg.colour.mode)
                 copied += 1
         # Count what is PRESENT, not what this run copied. Counting only copies
         # made every re-run look like an empty dataset and abort the stage — so
