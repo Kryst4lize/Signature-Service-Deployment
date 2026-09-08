@@ -166,6 +166,23 @@ def _make_pair(
 COLOUR_STAMP = ".colour_mode"
 
 
+def read_colour_stamp(dataset: Path) -> str:
+    """The colour mode the dataset on disk was written under.
+
+    An unstamped directory that already holds people is `none`, and that is a
+    fact rather than an assumption: before the correction moved into this
+    builder it was a bare `shutil.copytree`, so every dataset predating the
+    stamp is provably uncorrected.
+
+    An unstamped EMPTY directory has no content to describe, so it reports
+    whatever the caller is about to write.
+    """
+    stamp = dataset / COLOUR_STAMP
+    if stamp.is_file():
+        return stamp.read_text().strip()
+    return "none" if any(dataset.glob("*/*/")) else ""
+
+
 def _check_colour_stamp(dataset: Path, mode: str) -> None:
     """Refuse to extend a dataset that was written under a different colour mode.
 
@@ -174,28 +191,55 @@ def _check_colour_stamp(dataset: Path, mode: str) -> None:
     written folders uncorrected and report success. The result trains on a
     mixture of two colour distributions — the exact defect this setting exists
     to remove, made invisible by an incremental build.
+
+    The unstamped case is the one that matters, and an earlier version of this
+    function got it backwards. It assumed an unstamped dataset matched whatever
+    the current run wanted, which is wrong in precisely the situation the guard
+    exists for: the first time anyone sets `colour.mode: whiten`, every existing
+    dataset is unstamped and uncorrected. The guard would skip every folder,
+    write a stamp asserting `whiten`, log "assuming colour.mode='whiten'" as
+    though it had checked, and return full counts — training then ran on a
+    +8.18 corpus certified as corrected, and the one command that would have
+    fixed it (`mode=none`) was now refused by the false stamp.
     """
-    stamp = dataset / COLOUR_STAMP
-    if stamp.is_file():
-        previous = stamp.read_text().strip()
-        if previous != mode:
-            raise RuntimeError(
-                f"{dataset} was built with colour.mode={previous!r}, but this run "
-                f"has colour.mode={mode!r}. Existing person folders are skipped, so "
-                f"continuing would mix two colour distributions in one dataset.\n"
-                f"Delete {dataset} and re-run `sigtrain data-verification`."
+    previous = read_colour_stamp(dataset)
+    if previous and previous != mode:
+        raise RuntimeError(
+            f"{dataset} holds images written with colour.mode={previous!r}, but this "
+            f"run has colour.mode={mode!r}. Existing person folders are skipped, so "
+            f"continuing would mix two colour distributions in one dataset.\n"
+            f"Delete {dataset} and re-run `sigtrain data-verification`."
+            + (
+                f"\n(There is no {COLOUR_STAMP} file. The directory predates it, and "
+                f"the builder did not correct colour at all back then, so its contents "
+                f"are necessarily {previous!r}.)"
+                if not (dataset / COLOUR_STAMP).is_file()
+                else ""
             )
-        return
-    if any(dataset.glob("*/*/")):  # pre-dates the stamp; assume it matches
-        logger.warning(
-            "%s has no %s. It was built before the colour contract existed; "
-            "assuming colour.mode=%r. Delete and rebuild if that is wrong.",
-            dataset,
-            COLOUR_STAMP,
-            mode,
         )
     dataset.mkdir(parents=True, exist_ok=True)
-    stamp.write_text(f"{mode}\n")
+    (dataset / COLOUR_STAMP).write_text(f"{mode}\n")
+
+
+def require_colour_stamp(dataset: Path, mode: str) -> None:
+    """Assert that a dataset about to be READ carries the configured mode.
+
+    The builder's guard alone left a gap: nothing outside this module consulted
+    the stamp, so `sigtrain train-verification` would happily train on a
+    corrected corpus with the correction configured off, or the reverse, and say
+    nothing. Both produce a model whose colour distribution is not the one
+    recorded next to it.
+    """
+    previous = read_colour_stamp(dataset)
+    if previous and previous != mode:
+        raise RuntimeError(
+            f"{dataset} was built with colour.mode={previous!r}, but this run has "
+            f"colour.mode={mode!r}. The images on disk carry the correction; "
+            f"re-running with a mismatched setting trains on one distribution while "
+            f"recording another.\n"
+            f"Either set colour.mode={previous!r}, or delete {dataset} and re-run "
+            f"`sigtrain data-verification`."
+        )
 
 
 def _copy_person(folder: Path, target: Path, colour_mode: str) -> None:

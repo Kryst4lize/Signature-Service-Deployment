@@ -29,27 +29,43 @@ that has nothing to do with whose signature it is.
 Normalising the paper to a common white point at the moment of entry removes
 that difference on both sides. It costs three multiplies.
 
-WHY THE CORRECTION IS ALSO APPLIED AT DATASET BUILD TIME
+WHERE IT IS APPLIED, AND WHY EXACTLY ONCE
 
-Keras only offers a post-augmentation hook: `preprocessing_function` runs after
+`data/cyclegan.py:build_verification_split` corrects the images as it writes
+them, so what is on disk under `paths.verification_dataset` is already what the
+backbones should see. Everything reading that dataset therefore passes
+mode="none" here and gets Caffe preprocessing alone.
+
+Correcting at build time rather than in this hook is not a preference. Keras only
+offers a POST-augmentation hook: `preprocessing_function` runs after
 rotation/shift/shear/zoom, so it sees the borders those fill in. The configured
-augmentation fills a mean of 10.9% of the frame (p95 17.3%, max 20.8%, measured
-over 300 draws) with `cval=255`, and those neutral pixels land inside the paper
-band and drag the per-channel means together. Measured on the raw dataset cast:
-a 10% fill weakens the correction from +8.17 -> +0.00 down to +8.17 -> +0.83.
+augmentation fills a mean of 10.9% of the frame (p95 17.3%, max 20.8%, over 300
+draws) with `cval=255`; those neutral pixels land inside the paper band and drag
+the per-channel means together, weakening the correction from +8.17 -> +0.00
+down to +8.17 -> +0.83. At build time there is no augmentation and the estimate
+is clean.
 
-So `data/cyclegan.py:build_verification_split` applies the correction when it
-writes the dataset, before any augmentation exists, and this hook stays as an
-idempotent second pass. whiten() clamps its gain to [1.0, max_gain], so on paper
-that is already neutral it computes 1.0 and does nothing — measured residual for
-a second application is 0.026 levels. Belt and braces, at the cost of nothing.
+And applying it in BOTH places would be unsafe, which is worth stating because
+it looks free. whiten() is idempotent only while its gain clamp does not bind.
+The clamp is what breaks idempotence, not what guarantees it: when
+`estimate_paper(img).max() / .min()` exceeds `max_gain`, the first pass is
+truncated and by construction leaves the paper un-neutral, so a second pass
+applies the remainder. Two passes then reach `max_gain**2` = 2.56, silently
+doubling the safety limit colour.py sets to stop a dark photograph being
+stretched into white. Measured on a tungsten capture with paper (248, 190, 130):
+one pass caps blue at 1.600x as intended, two reach 1.908x — 41 levels of
+per-pixel drift and a VGG16 embedding cosine distance of 0.028.
 
+The real scans never approach that (imbalance 1.034 raw, 1.014 denoised), so the
+composition happens to be safe on this corpus. It is not safe in general, and the
+serving side must therefore apply the correction exactly once too.
 
-The serving half of this contract is not wired yet — the service declares
-COLOUR_MODE but no code reads it. When it is, it must apply the same correction
-at the same point: immediately before `to_caffe` in
-`inference/api/app/triton.py`. `data/colour.py` is byte-identical to the
-service's copy for exactly this reason.
+THE SERVING HALF IS NOT WIRED YET
+
+The service declares COLOUR_MODE and no code reads it. When it is wired, the
+correction belongs immediately before `to_caffe` in
+`inference/api/app/triton.py` — once, on the denoised tensor. `data/colour.py`
+is byte-identical to the service's copy for exactly this reason.
 """
 
 from __future__ import annotations
@@ -80,7 +96,7 @@ def _keras_preprocess(backbone: str) -> Callable:
         ) from None
 
 
-def extractor_preprocess(backbone: str, mode: str) -> Callable[[np.ndarray], np.ndarray]:
+def extractor_preprocess(backbone: str, mode: str = "none") -> Callable[[np.ndarray], np.ndarray]:
     """Return the function that turns a loaded image into extractor input.
 
     The returned callable takes ONE image as HWC float in [0, 255] and returns
@@ -90,9 +106,11 @@ def extractor_preprocess(backbone: str, mode: str) -> Callable[[np.ndarray], np.
     the same object can be handed to a generator or called directly on a single
     array.
 
-    `mode` comes from `Config.colour.mode`. "none" makes step 1 an identity, so
-    the default behaviour is byte-for-byte what it was before this contract
-    existed.
+    `mode` is for callers holding a RAW image. Anything read from
+    `paths.verification_dataset` was already corrected when the dataset was
+    written, so the pipeline passes "none" — see the module docstring for why
+    correcting twice is not free. "none" makes step 1 an identity, byte-for-byte
+    what this did before the contract existed.
     """
     if mode not in {"none", "whiten", "desaturate"}:
         raise ValueError(f"Unknown colour mode {mode!r}; expected none|whiten|desaturate")

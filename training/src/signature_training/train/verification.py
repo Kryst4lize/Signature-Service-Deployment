@@ -30,6 +30,7 @@ from tensorflow.keras.callbacks import (
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from ..config import Config
+from ..data.cyclegan import require_colour_stamp
 from ..models.backbones import (
     build_resnet50,
     build_vgg16,
@@ -55,11 +56,20 @@ def _generators(cfg: Config, backbone: str):
     if not train_dir.is_dir():
         raise FileNotFoundError(f"{train_dir} not found. Run `sigtrain data-verification` first.")
 
+    # The images under train_dir already carry cfg.colour.mode, applied when the
+    # dataset was written. Confirm that before training on them: nothing else
+    # compares the two, so a mismatch would train on one colour distribution
+    # while recording another in config.used.yaml.
+    require_colour_stamp(cfg.paths.resolve("verification_dataset"), cfg.colour.mode)
+
     filtered = _genuine_only(train_dir)
     v = cfg.verification
 
     aug = ImageDataGenerator(
-        preprocessing_function=extractor_preprocess(backbone, cfg.colour.mode),
+        # No colour mode here on purpose. The correction is already in the
+        # pixels, and this hook runs after augmentation — applying it again
+        # would compose two clamped gains. See models/preprocess.py.
+        preprocessing_function=extractor_preprocess(backbone),
         rotation_range=8,
         width_shift_range=0.10,
         height_shift_range=0.10,
@@ -195,18 +205,19 @@ def embed(
     extractor: tf.keras.Model,
     image_path: str,
     backbone: str,
-    colour_mode: str = "none",
+    colour_mode: str,
     size: int = 224,
 ) -> np.ndarray:
-    """One image -> L2-normalised embedding, using the same preprocessing the
-    model was trained with.
+    """One RAW image -> L2-normalised embedding.
 
-    `colour_mode` is not optional in spirit: pass `cfg.colour.mode`. It defaults
-    to "none" only so that a caller holding a model trained without colour
-    correction gets the matching behaviour by default rather than silently the
-    wrong one.
+    `colour_mode` is required rather than defaulted. A default would be wrong
+    half the time and undetectably so: nothing in a saved `.keras` file records
+    the colour mode it was trained under, and an embedding computed with the
+    wrong one comes out plausible (measured cosine 0.9996 against the right
+    answer) rather than obviously broken.
 
-    The inference service must match this exactly; see
+    Images already read from `paths.verification_dataset` carry the correction;
+    pass "none" for those. The inference service must match this exactly; see
     inference/api/app/triton.py:to_caffe.
     """
     return embed_image(extractor, image_path, backbone, colour_mode, size)
