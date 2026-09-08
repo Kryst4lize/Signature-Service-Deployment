@@ -49,8 +49,13 @@ TensorFlow 2.21 — maximum absolute difference `0.000e+00` for both backbones.
 ### If you change preprocessing
 
 Change it in both halves and update the tests. Training-side preprocessing is
-in `training/src/signature_training/train/verification.py`; serving-side is
-`to_caffe` / `to_cyclegan` / `from_cyclegan`.
+`training/src/signature_training/models/preprocess.py`, which is the single path
+used by training and evaluation alike; serving-side is `to_caffe` /
+`to_cyclegan` / `from_cyclegan` in `inference/api/app/triton.py`.
+
+`preprocess_input(mode="caffe")` **mutates its argument**: it reverses the
+channel axis into a numpy view and subtracts the mean in place. Anything that
+reuses the array afterwards needs a copy first.
 
 ---
 
@@ -112,21 +117,100 @@ Measured after those two fixes:
 
 Ink/paper contrast goes *up* slightly (153.2 → 155.8), so strokes are not eroded.
 
-### What to actually do
+---
 
-The root fix is upstream: set `cyclegan_data.colour_mode: whiten`, rebuild the
-CycleGAN dataset and retrain. Domain A then has neutral paper and the generator
-stops emitting a cast at all — which is why the residual on the current model
-(+1.75) cannot be driven to zero from the outside: post-hoc correction is
-undoing something the weights already baked in, against a saturating ceiling.
+## The colour contract
 
-Until then, `PREVIEW_WHITEN=true` (the default) neutralises the previews the UI
-shows without touching the tensor that produces an embedding. That fixes the
-visible symptom at zero model risk.
+One setting, `colour.mode` in `training/configs/default.yaml`, applied at every
+point an image enters a model:
 
-`COLOUR_MODE` applies the correction in the embedding path and **must match
-`cyclegan_data.colour_mode`**. Turning it on alone reintroduces exactly the
-train/serve skew this pipeline has already been bitten by once.
+```yaml
+colour:
+  mode: none        # none | whiten | desaturate
+```
+
+| stage | where | what it corrects |
+|---|---|---|
+| `data-cyclegan` | `data/cyclegan.py:_make_pair` | the clean image, before noise is added, so domains A and B share a paper colour |
+| `data-verification` | `data/cyclegan.py:_copy_person` | the images written to disk, which is what the backbones read |
+| `train-verification` | `models/preprocess.py` | the Keras `preprocessing_function` hook |
+| `evaluate` | `models/preprocess.py` | the same hook, so the EER describes the pipeline that will run |
+
+### Why the correction happens twice
+
+Keras offers only a **post-augmentation** hook: `preprocessing_function` runs
+after rotation, shift, shear and zoom, so it sees the borders those fill in. The
+configured augmentation fills a mean of **10.9%** of the frame with `cval=255`
+(p95 17.3%, max 20.8%, over 300 draws). Those neutral pixels land inside the
+paper band and drag the per-channel means together:
+
+| | residual cast after `whiten` |
+|---|---|
+| clean estimate | +0.00 |
+| with 10% `cval=255` fill | **+0.83** |
+
+About a tenth of the cast survives — a tenth of the reason the setting exists.
+So the correction is applied when the dataset is written, before any
+augmentation exists, and the hook stays as a second pass.
+
+That is safe because **`whiten` is idempotent**. Its gain is clamped to
+`[1.0, max_gain]`, so paper that is already neutral yields exactly 1.0 and
+nothing happens. Measured residual for a second application: **0.001 levels** on
+the raw cast, **0.026** on the denoised one.
+
+### One knob, not six
+
+`paper_level`, `max_gain`, `strength` and `lift` are deliberately *not* config
+keys. They are module constants in `colour.py`, which is byte-identical between
+the two halves and kept that way by a CI diff. That leaves exactly one string
+that can disagree between training and serving instead of six.
+
+### Changing the mode
+
+It **invalidates the trained extractors** — they learn whatever colour
+distribution they were fed. In order:
+
+```bash
+rm -rf training/data/processed/verification   # the builder refuses to mix modes
+sigtrain data-verification --set colour.mode=whiten
+sigtrain train-verification --set colour.mode=whiten
+sigtrain evaluate          --set colour.mode=whiten   # prints the new threshold
+sigtrain export
+```
+
+`data-verification` writes a `.colour_mode` stamp into the dataset directory and
+refuses to extend a dataset built under a different mode. Without it, the
+builder's skip-if-exists behaviour would leave half the corpus under the old
+distribution and report success.
+
+Rebuilding the **CycleGAN** pair set and retraining the denoiser is a separate,
+much longer job (200 epochs). It is the root fix — domain A then has neutral
+paper and the generator stops emitting a cast at all — and it is why the
+residual on the *current* weights (+1.75) cannot be driven to zero from the
+outside: post-hoc correction is undoing something the weights already baked in,
+against a saturating ceiling.
+
+### The serving side is not wired yet
+
+`sigtrain evaluate` prints the line to paste:
+
+```
+MATCH_THRESHOLD=0.3012   # from resnet50
+COLOUR_MODE=whiten
+```
+
+**But nothing in the service reads `COLOUR_MODE` today.** `settings.colour_mode`
+is declared in `inference/api/app/config.py` and no code consumes it; the
+correction has to be applied to the `[0, 1]` RGB tensor immediately before
+`to_caffe` in `inference/api/app/triton.py`, and that call does not exist. Until
+it does, setting `colour.mode` to anything but `none` produces a **train/serve
+skew** — the models are trained on normalised paper and served un-normalised
+paper.
+
+`PREVIEW_WHITEN=true` (the default) is a different thing and does work: it
+neutralises the base64 previews the UI shows, touching what a human sees and
+nothing that produces an embedding. That fixes "the output looks blue" at zero
+model risk.
 
 `desaturate` is the stronger option: a signature's identity is stroke geometry,
 not colour, so discarding chroma removes this cast and every other
@@ -283,3 +367,7 @@ MATCH_THRESHOLD = 1 - eer_threshold
 
 The runner prints the converted value directly, because getting this inversion
 wrong produces a system that looks configured and accepts everyone.
+
+It prints `COLOUR_MODE=` on the next line. The threshold is only valid for the
+colour mode it was measured under, so the two belong together — see
+[the colour contract](#the-colour-contract).

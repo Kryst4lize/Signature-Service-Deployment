@@ -217,20 +217,44 @@ so 15% is held out of `train/` instead (`verification.val_split`).
 
 The scans carry a measured red deficit in the paper — R 243.3 against G/B 251.5,
 i.e. **B−R = +8.18** — which reads as a cyan/blue cast, and the denoiser
-reproduces it (its own output measures +3.45). `cyclegan_data.colour_mode`
-controls what the dataset builder does about it:
+reproduces it (its own output measures +3.45). So the backbones were trained at
++8.18 and served +3.45: two colour distributions, neither normalised, and the
+embedding had to absorb a difference that says nothing about whose signature it
+is.
+
+One setting fixes that at every point an image enters a model:
 
 ```yaml
-cyclegan_data:
-  colour_mode: none        # none | whiten | desaturate
+colour:
+  mode: none        # none | whiten | desaturate
 ```
 
+| stage | what it corrects |
+|---|---|
+| `data-cyclegan` | the clean image before noise, so both domains share a paper colour |
+| `data-verification` | the images written to disk |
+| `train-verification` | the Keras preprocessing hook |
+| `evaluate` | the same hook, so the EER describes the pipeline that will run |
+
 `whiten` takes the dataset cast to −0.10 and slightly improves ink/paper
-contrast. It **must be matched by `COLOUR_MODE` in `inference/.env`**, and it
-only takes effect after a retrain — the current weights already carry the cast.
+contrast. It is applied twice on purpose — at dataset-build time, where the
+estimate is clean, and again in the Keras hook, which runs *after* augmentation
+and would otherwise see the 10.9% of the frame that `cval=255` fills (measured
+residual +0.83 instead of +0.00). The second pass is free because `whiten`
+clamps its gain to `[1.0, max_gain]`, so neutral paper yields 1.0 and nothing
+happens.
+
+Changing the mode **invalidates the trained extractors**. Delete
+`data/processed/verification/` — the builder refuses to mix modes — then re-run
+`data-verification`, `train-verification`, `evaluate`, `export`.
+
+`sigtrain evaluate` prints `COLOUR_MODE=` alongside `MATCH_THRESHOLD=`. Note
+that **the service does not read `COLOUR_MODE` yet**: `settings.colour_mode` is
+declared and unused, so any mode but `none` is currently a train/serve skew until
+the serving side is wired.
 
 Full measurements and the two implementation traps are in
-[documentation/02-pipeline-deep-dive.md](../documentation/02-pipeline-deep-dive.md#the-paper-colour-cast).
+[documentation/02-pipeline-deep-dive.md](../documentation/02-pipeline-deep-dive.md#the-colour-contract).
 
 ### Two-phase fine-tuning
 
