@@ -14,6 +14,9 @@ import logging
 import numpy as np
 from PIL import Image, ImageDraw
 
+from app import colour
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -65,6 +68,21 @@ def pil_to_b64(img: Image.Image, fmt: str = "PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def preview_b64(img: Image.Image, fmt: str = "PNG") -> str:
+    """Encode an image for the UI, optionally neutralising the paper cast.
+
+    Display only. The training scans are ~8 levels short on red in the paper,
+    which reads as a cyan/blue tint, and the denoiser reproduces it — so the
+    pictures returned to the operator look blue even when the embedding is
+    fine. Correcting here changes what a human sees and nothing the model
+    touches. See settings.colour_mode for the version that does.
+    """
+    if not settings.preview_whiten:
+        return pil_to_b64(img, fmt)
+    arr = colour.whiten(np.asarray(img.convert("RGB"), dtype=np.float32))
+    return pil_to_b64(Image.fromarray(arr.astype(np.uint8), "RGB"), fmt)
 
 
 def tensor_to_b64(tensor: np.ndarray, fmt: str = "PNG") -> str:
