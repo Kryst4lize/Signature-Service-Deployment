@@ -29,8 +29,10 @@ serves.
 
 ### Why the extractors are the subtle one
 
-`ImageDataGenerator(preprocessing_function=preprocess_input)` applies the
-transform *before* the model sees anything. No `Rescaling` or `Normalization`
+`ImageDataGenerator(preprocessing_function=...)` applies the transform *before*
+the model sees anything — today via
+`models/preprocess.py:extractor_preprocess`, which composes the colour
+correction with Keras' `preprocess_input`. No `Rescaling` or `Normalization`
 layer is ever added to the graph. So the saved `.keras` model — and therefore
 the exported ONNX — begins at `Conv1` on an **already-preprocessed** tensor.
 
@@ -192,8 +194,9 @@ one command that would rebuild it.
 ### One knob, not six
 
 `paper_level`, `max_gain`, `strength` and `lift` are deliberately *not* config
-keys. They are module constants in `colour.py`, which is byte-identical between
-the two halves and kept that way by a CI diff. That leaves exactly one string
+keys. They are module constants in `colour.py`, whose two copies are identical
+from the `from __future__` line onward — the module docstrings differ, and the
+CI diff compares exactly that region. That leaves exactly one string
 that can disagree between training and serving instead of six.
 
 ### Changing the mode

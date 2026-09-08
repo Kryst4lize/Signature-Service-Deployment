@@ -21,9 +21,35 @@
 
 **Verified 2026-09-08:** downloads without Kaggle credentials from
 `https://www.kaggle.com/api/v1/datasets/download/robinreni/signature-verification-dataset`
-(630 MB zip, 4,298 PNGs, 128 person folders under `train/`). The layout matches
-what `sigtrain data-cyclegan` and `data-verification` expect, so it can be
-extracted straight to `training/data/raw/sign_data/`.
+(~630 MB zip).
+
+**The archive contains the corpus twice**, and that matters. Reading the zip's
+local file headers directly: the first entry is
+`sign_data/sign_data/test/049/01_049.png`, and a 360 MB sample of the stream
+holds 2,151 entries under `sign_data/sign_data/` alongside 276 under
+`sign_data/test/`. So extracting gives
+
+```
+sign_data/
+├── train/, test/            <- the corpus
+└── sign_data/
+    └── train/, test/        <- the same corpus again
+```
+
+which is where the frequently-quoted "4,298 PNGs" comes from: it is ~2,149
+images counted twice.
+
+Delete the nested copy after extracting:
+
+```bash
+rm -rf training/data/raw/sign_data/sign_data
+```
+
+`build_verification_split` is unaffected either way — it reads `src/train` and
+`src/test` by name. **`data-cyclegan` is not**: `collect_images` uses `rglob`, so
+it would find every signature twice, and the 90/10 shuffle would then place the
+same signature in both `train` and `test`. The denoiser would be evaluated on
+images it trained on.
 
 Measured colour statistics of the genuine training images (400 sampled,
 background = luminance > 200):
@@ -41,8 +67,12 @@ does about it.
 
 ### 1.2 Alternative Kaggle source
 
-<https://www.kaggle.com/datasets/mallapraveen/signature-matching> — same shape,
-usable as a substitute.
+<https://www.kaggle.com/datasets/mallapraveen/signature-matching> — a substitute,
+but **not the same layout**. Its ~4,289 PNGs sit under `custom/full/`, not under
+`{train,test}/NNN/`, so `paths.raw_signatures` cannot simply be repointed at it:
+`build_verification_split` looks for `train/` and `test/` by name and would find
+neither. Reshape it first, or use it only for `data-cyclegan`, which globs
+recursively.
 
 ### 1.3 Stamp noise corpus (internal)
 
@@ -53,20 +83,24 @@ redistributable and not on Kaggle.
 <<< STAMP_CORPUS_URL — placeholder, not yet set >>>
 ```
 
-> The link is **deliberately unset**. Substitute your own before relying on this
-> section; nothing in the pipeline reads it, so an unset placeholder breaks
-> nothing but a human's expectations.
+> The link is **deliberately unset**, to be filled in later. Nothing in the
+> pipeline reads it, so the placeholder breaks nothing.
+>
+> A copy of the corpus is currently in the download share below, under
+> `stamp_noise_data/` (16 files, ~1.4 MB). Treat the link above as the canonical
+> pointer once it is set.
 
 Everything needed to proceed without that link:
 
 | | |
 |---|---|
 | Location | `training/data/raw/stamps/` (`paths.stamps`) |
-| Formats | `.png`, `.jpg`, `.jpeg`, `.bmp` — PNG with alpha preferred |
+| Formats | `.png`, `.jpg`, `.jpeg`, `.bmp`, and the uppercase spellings |
 | Count | a few dozen is plenty; the pipeline used 16 |
 | Content | round/oval company seals, one per file, any resolution |
-| Background | white or transparent — it is removed on load |
-| Colour | red or greyscale; achromatic scans are tinted to Vietnamese official red (H≈0°, S≈85%, V≈90%) automatically |
+| Alpha | **discarded**, not used — `_load_stamps` converts BGRA to BGR and derives its own mask from the background |
+| Background | white; `_remove_background` is what makes the seal composite cleanly, so a photographed seal on grey paper will not work well |
+| Colour | red or greyscale. Achromatic scans are tinted by `_tint_red`: R +96, G and B x0.52, aiming at roughly (B 30, G 20, R 210). Those are the actual operations — not a hue/saturation set point |
 
 `StampAugmentor` scales each seal to a physically plausible diameter relative to
 the signature, rotates it, and **multiply**-blends it so the seal sits under the
@@ -85,7 +119,10 @@ it is being asked to do.
 
 ### 1.4 Test pipeline documents (internal)
 
-Six real PDFs used for end-to-end checks. Same share.
+Six real PDFs used for end-to-end checks. **Not in the download share** — it was
+enumerated exhaustively on 2026-09-08 and contains no PDFs. They are withheld
+under a confidentiality agreement, so end-to-end checks against real documents
+need your own.
 
 ---
 
@@ -111,8 +148,9 @@ deciding whether a change is a deviation from the reference or a bug.
 
 ## 1.7 TensorRT engines
 
-The share carries five `model.plan` files, so the deployment has run on the
-TensorRT backend as well as onnxruntime.
+The share carries five `model.plan` files — yolov8s 54.65 MB, latest_net_G_A and
+G_B 79.42 MB each, resnet50_extractor 130.15 MB, vgg16_extractor 515.67 MB — so
+the deployment has run on the TensorRT backend as well as onnxruntime.
 
 **The pipeline no longer builds them.** `convert_to_trt.py` (1,886 lines) was
 removed during the refactor: its CycleGAN path was broken (wrong `state_dict`
@@ -171,55 +209,92 @@ the stamp corpus and the test PDFs — live in one OneDrive/SharePoint folder:
 > `$FOLDER` is `/personal/<user>/Documents/Work/Model_SignatureVerification`.
 > Verified 2026-09-08 against the live share.
 
-### Trained model files
+### What is actually in the share
 
-| File | Format | Size | Download Link |
-|------|--------|------|---------------|
-| `latest_net_G_B.pth` | PyTorch | 43.4 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_G_A.pth` | PyTorch | 43.4 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_D_A.pth` | PyTorch | 10.6 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_D_B.pth` | PyTorch | 10.6 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `vgg16_extractor.keras` | Keras | 448 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `vgg16_finetuned.keras` | Keras | 1,028 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `resnet50_extractor.keras` | Keras | 123 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `resnet50_finetuned.keras` | Keras | 248 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `yolov8s.onnx` | ONNX | 42.6 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
+Enumerated over the REST API on 2026-09-08 using the recipe above. Sizes are
+**decimal MB** taken from the `Length` field — an earlier revision of this table
+quoted MiB but labelled them MB, which is where "43.4 MB" for a 45.53 MB file
+came from.
 
-### Deployed ONNX Models (Triton-ready)
+Everything is reachable from the one link above; per-file direct links are not
+issued by an anonymous share, so the table gives paths rather than URLs.
 
-| File | Format | Size | Download Link |
-|------|--------|------|---------------|
-| `yolov8s/1/model.onnx` | ONNX | 42.5 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_G_B/1/model.onnx` | ONNX | 43.5 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_G_A/1/model.onnx` | ONNX | 43.5 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `resnet50_extractor/1/model.onnx` | ONNX | 121.9 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `vgg16_extractor/1/model.onnx` | ONNX | 448.1 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
+#### Root
 
-### TensorRT Plans (Optional, GPU-specific)
+| File | MB |
+|---|---|
+| `latest_net_G_A.pth` | 45.53 |
+| `latest_net_G_B.pth` | 45.53 |
+| `latest_net_D_A.pth` | 11.06 |
+| `latest_net_D_B.pth` | 11.06 |
+| `vgg16_extractor.keras` | 470.00 |
+| `vgg16_finetuned.keras` | 1078.08 |
+| `vgg16_phase1_best.keras` | 541.03 |
+| `vgg16_phase2_best.keras` | 1078.08 |
+| `resnet50_extractor.keras` | 128.57 |
+| `resnet50_finetuned.keras` | 260.01 |
+| `resnet50_phase1_best.keras` | 166.05 |
+| `resnet50_phase2_best.keras` | 260.01 |
+| `vgg16_weights_tf_dim_ordering_tf_kernels.h5` | 553.47 |
+| `resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5` | 94.77 |
+| `yolo_model.onnx` | 44.62 |
 
-| File | Format | Size | Download Link |
-|------|--------|------|---------------|
-| `yolov8s/1/model.plan` | TensorRT | 52.1 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_G_B/1/model.plan` | TensorRT | 75.8 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `latest_net_G_A/1/model.plan` | TensorRT | 75.8 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `resnet50_extractor/1/model.plan` | TensorRT | 124.1 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
-| `vgg16_extractor/1/model.plan` | TensorRT | 491.8 MB | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
+The detector is **`yolo_model.onnx`**, not `yolov8s.onnx`. The pipeline's Triton
+model directory is named `yolov8s`, so the file has to be renamed to
+`yolov8s/1/model.onnx` on the way in — `sigtrain export` does that itself, but a
+hand copy will not.
+
+The four `*_phase{1,2}_best.keras` files are `ModelCheckpoint` output from the
+two training phases, not deployment artefacts.
+
+#### `model_repository/` — Triton-ready
+
+| Model | `model.onnx` | `model.plan` |
+|---|---|---|
+| `yolov8s/1/` | 44.62 (named `yolo_model.onnx`) | 54.65 |
+| `latest_net_G_A/1/` | 45.64 | 79.42 |
+| `latest_net_G_B/1/` | 45.64 (plus `model_org.onnx`, 45.62) | 79.42 |
+| `resnet50_extractor/1/` | 127.78 | 130.15 |
+| `vgg16_extractor/1/` | 469.93 | 515.67 |
+
+The `.plan` files are TensorRT engines, specific to the GPU and TensorRT version
+that built them — see §1.7. `latest_net_G_B/1/model_org.onnx` is undocumented;
+treat `model.onnx` as authoritative.
+
+#### `stamp_noise_data/` — the stamp corpus
+
+16 files, ~1.4 MB total: 12 PNG screenshots (`Annotation 2026-05-02 *.png`) and
+4 JPGs (`mau-con-dau-tron-cong-ty{1,2,3}.jpg`, `khac-dau-ten-tai-bien-hoa{2,5}.jpg`).
+This is the corpus §1.3 describes.
+
+#### Not in the share
+
+No PDFs. §1.4's six test-pipeline documents are **not** here — the root, both
+subfolders and all five `model_repository/*/1/` directories were enumerated and
+contain none.
 
 ### Datasets
 
-| Dataset | Source | Download Link |
-|---------|--------|---------------|
-| Signature Cleaning Dataset | Kaggle | [kaggle.com/datasets/robinreni/signature-verification-dataset](https://www.kaggle.com/datasets/robinreni/signature-verification-dataset) |
-| Signature Verification Dataset | Kaggle | [kaggle.com/datasets/mallapraveen/signature-matching](https://www.kaggle.com/datasets/mallapraveen/signature-matching)
-| Stamp noise images | Internal collection | `<<< STAMP_CORPUS_URL — placeholder >>>` — see [1.3](#13-stamp-noise-corpus-internal) |
-| Test pipeline PDFs | Internal documents | Unavailable due to confidentiality agreement |
+| Dataset | Where |
+|---|---|
+| Signature corpus (primary) | [kaggle.com/datasets/robinreni/signature-verification-dataset](https://www.kaggle.com/datasets/robinreni/signature-verification-dataset) — see §1.1 for the duplicate-tree caveat |
+| Signature corpus (substitute) | [kaggle.com/datasets/mallapraveen/signature-matching](https://www.kaggle.com/datasets/mallapraveen/signature-matching) — different layout, see §1.2 |
+| Stamp noise images | `stamp_noise_data/` in the share; canonical link is the §1.3 placeholder |
+| Test pipeline PDFs | Not in the share; withheld under a confidentiality agreement |
 
-### Pretrained Backbone Weights
+One raw corpus feeds both stages — `paths.raw_signatures` is read by
+`data-cyclegan` and `data-verification` alike. There is not one dataset per
+stage.
 
-| File | Source | Download Link |
-|------|--------|---------------|
-| VGG16 ImageNet weights | Keras Applications | Auto-downloaded by Keras, or [direct link](https://storage.googleapis.com/tensorflow/keras-applications/vgg16/vgg16_weights_tf_dim_ordering_tf_kernels.h5) |
-| ResNet50 ImageNet weights (no-top) | Keras Applications | Auto-downloaded by Keras, or [direct link](https://storage.googleapis.com/tensorflow/keras-applications/resnet/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5) |
+### Pretrained backbone weights
+
+| File | Source |
+|------|--------|
+| VGG16 ImageNet weights | Auto-downloaded by Keras, or [direct link](https://storage.googleapis.com/tensorflow/keras-applications/vgg16/vgg16_weights_tf_dim_ordering_tf_kernels.h5) |
+| ResNet50 ImageNet weights (no-top) | Auto-downloaded by Keras, or [direct link](https://storage.googleapis.com/tensorflow/keras-applications/resnet/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5) |
+
+Both are also in the share (553.47 MB and 94.77 MB), which avoids a ~650 MB
+download on every fresh image.
 
 ---
 

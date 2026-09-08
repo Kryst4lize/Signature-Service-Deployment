@@ -33,9 +33,11 @@ One table. One row per enrolled signature.
 | `resnet50_vector` | L2-normalised `fc1` output |
 | `vgg16_vector` | L2-normalised `fc1` output |
 
-4096 is fixed by three files that must agree: this schema,
-`Vector(4096)` in `inference/api/app/db.py`, and `dims: [ 4096 ]` in each
-extractor's `config.pbtxt`.
+4096 is fixed by three files that must agree: `Vector(4096)` in
+`inference/api/app/db.py`, the migration that creates the columns
+(`inference/api/migrations/versions/0001_initial_schema.py`), and
+`dims: [ 4096 ]` in each extractor's `config.pbtxt`. Not `init.sql` — it
+declares no columns.
 
 ---
 

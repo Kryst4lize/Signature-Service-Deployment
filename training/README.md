@@ -323,7 +323,10 @@ uv run pytest      # on the host, against the locked environment
 ```
 
 The suite covers dataset construction, augmentation determinism, config
-resolution, metrics, pair building, config.pbtxt generation and the CLI.
+resolution, metrics, pair building, config.pbtxt generation, the CLI, and the
+colour contract. The colour tests that need TensorFlow are marked and skip
+cleanly without it, so the TensorFlow-free `make test` image still runs the
+rest.
 
 ---
 
@@ -351,7 +354,8 @@ halves. `uv.lock` is committed and authoritative: the images build with
 
 ## Preprocessing contract
 
-The extractors are trained with Keras `preprocess_input(mode="caffe")` applied
+The extractors are trained with `models/preprocess.py:extractor_preprocess` —
+the paper white-balance, then Keras `preprocess_input(mode="caffe")` — applied
 **outside** the model by `ImageDataGenerator`. The exported ONNX therefore
 begins at Conv1 on an already-preprocessed tensor — BGR, ImageNet mean
 subtracted, `[0, 255]` scale — and **the serving side must reproduce it**.

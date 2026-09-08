@@ -113,7 +113,8 @@ extractor passes issued concurrently. Pages are processed sequentially within a
 request.
 
 The database side is an exact scan, ~80 ms at 5,000 rows, growing linearly.
-See [Database](./04-database.md#if-enrolment-outgrows-that).
+See [Database](./04-database.md#vector-indexing) for the ANN option and its
+measured trade-off.
 
 Scaling levers, roughly in order:
 
