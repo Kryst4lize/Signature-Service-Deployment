@@ -47,9 +47,41 @@ usable as a substitute.
 ### 1.3 Stamp noise corpus (internal)
 
 ~16 Vietnamese round seals / company stamps, collected internally. Not
-redistributable and not on Kaggle — get it from the share below and place it at
-`training/data/raw/stamps/`. Without it `sigtrain data-cyclegan` warns and the
-denoiser never learns to remove seals.
+redistributable and not on Kaggle.
+
+```
+<<< STAMP_CORPUS_URL — placeholder, not yet set >>>
+```
+
+> The link is **deliberately unset**. Substitute your own before relying on this
+> section; nothing in the pipeline reads it, so an unset placeholder breaks
+> nothing but a human's expectations.
+
+Everything needed to proceed without that link:
+
+| | |
+|---|---|
+| Location | `training/data/raw/stamps/` (`paths.stamps`) |
+| Formats | `.png`, `.jpg`, `.jpeg`, `.bmp` — PNG with alpha preferred |
+| Count | a few dozen is plenty; the pipeline used 16 |
+| Content | round/oval company seals, one per file, any resolution |
+| Background | white or transparent — it is removed on load |
+| Colour | red or greyscale; achromatic scans are tinted to Vietnamese official red (H≈0°, S≈85%, V≈90%) automatically |
+
+`StampAugmentor` scales each seal to a physically plausible diameter relative to
+the signature, rotates it, and **multiply**-blends it so the seal sits under the
+ink the way real toner does. Substituting your own stamps therefore needs no code
+change.
+
+Without any stamps, `sigtrain data-cyclegan` logs
+
+```
+StampAugmentor: no stamp images found in '<path>'
+```
+
+and continues. The pair set is still built and CycleGAN still trains — the
+denoiser simply never learns to remove seals, which is the single largest thing
+it is being asked to do.
 
 ### 1.4 Test pipeline documents (internal)
 
@@ -116,12 +148,28 @@ the stamp corpus and the test PDFs — live in one OneDrive/SharePoint folder:
 
 <https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc>
 
-> **Access:** as of 2026-09-08 this link resolves to
-> `/Documents/Work/Model_SignatureVerification` but returns **403 FORBIDDEN**
-> to an unauthenticated fetch — it is tenant-restricted, or the `?e=` token has
-> expired. Sign in with a Mintcash account, or re-share as "Anyone with the
-> link" if it needs to be reachable from CI or from a machine outside the
-> tenant.
+> **Access:** the share is reachable by **anyone with the link**, without a
+> Mintcash account. An earlier revision of this document claimed it returned
+> 403 and was tenant-restricted; that was wrong, and it was wrong for a
+> mechanical reason worth recording.
+>
+> A bare `curl` does fail. SharePoint's anonymous-share flow needs two things:
+> a browser `User-Agent` (otherwise the request is redirected to the login page)
+> and a **cookie jar**, because the first request sets the anonymous-session
+> cookies that authorise the second. With both, the REST API works unauthenticated:
+>
+> ```bash
+> UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+> (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+> curl -sL -c jar.txt -A "$UA" '<share link>' -o /dev/null      # seed the cookies
+> curl -s  -b jar.txt -A "$UA" \
+>   -H 'Accept: application/json;odata=nometadata' \
+>   "$WEB/_api/web/GetFolderByServerRelativeUrl('$FOLDER')/Files?\$select=Name,Length"
+> ```
+>
+> where `$WEB` is `https://mintcash-my.sharepoint.com/personal/<user>` and
+> `$FOLDER` is `/personal/<user>/Documents/Work/Model_SignatureVerification`.
+> Verified 2026-09-08 against the live share.
 
 ### Trained model files
 
@@ -163,7 +211,7 @@ the stamp corpus and the test PDFs — live in one OneDrive/SharePoint folder:
 |---------|--------|---------------|
 | Signature Cleaning Dataset | Kaggle | [kaggle.com/datasets/robinreni/signature-verification-dataset](https://www.kaggle.com/datasets/robinreni/signature-verification-dataset) |
 | Signature Verification Dataset | Kaggle | [kaggle.com/datasets/mallapraveen/signature-matching](https://www.kaggle.com/datasets/mallapraveen/signature-matching)
-| Stamp noise images | Internal collection | [link](https://mintcash-my.sharepoint.com/:f:/g/personal/lethanhminh0801_mintcash_onmicrosoft_com/IgBY8nP1MqSLTrbDjnGzVo6nAa94By6uqtOJTEqrPOQzcks?e=gJhgXc) |
+| Stamp noise images | Internal collection | `<<< STAMP_CORPUS_URL — placeholder >>>` — see [1.3](#13-stamp-noise-corpus-internal) |
 | Test pipeline PDFs | Internal documents | Unavailable due to confidentiality agreement |
 
 ### Pretrained Backbone Weights
