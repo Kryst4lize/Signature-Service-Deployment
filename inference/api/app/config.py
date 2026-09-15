@@ -32,12 +32,17 @@ class Settings(BaseSettings):
     detection_confidence: float = 0.5
 
     # ── Colour ────────────────────────────────────────────────────────────────
-    # Paper white-balance in the EMBEDDING path: "none" | "whiten" | "desaturate".
+    # Paper white-balance for the embedding path: "none" | "whiten" | "desaturate".
     #
-    # MUST MATCH training's cyclegan_data.colour_mode. The models learn whatever
-    # colour distribution they were trained on, so enabling this without
-    # retraining feeds them input they have never seen — the same class of
-    # silent train/serve skew as the Caffe preprocessing. Default "none".
+    # DECLARED BUT NOT READ. No code consults this; extract_features goes straight
+    # from the denoised tensor to to_caffe. The correction belongs there, applied
+    # ONCE — colour.whiten is idempotent only while its gain clamp does not bind,
+    # so a second application can reach max_gain**2.
+    #
+    # When wired it must match training's `colour.mode` (top level in
+    # training/configs/default.yaml). The models learn whatever colour
+    # distribution they were trained on, so the two moving independently is the
+    # same class of silent train/serve skew as the Caffe preprocessing.
     colour_mode: str = "none"
 
     # Whiten the base64 previews returned to the UI (page_annotated,

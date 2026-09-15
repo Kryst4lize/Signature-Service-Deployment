@@ -118,6 +118,13 @@ def stage_evaluate(cfg: Config, args) -> None:
         print(f"  # {r['name']}: EER {r['eer']:.4f}")
     best = min(results, key=lambda r: r["eer"])
     print(f"  MATCH_THRESHOLD={best['match_threshold_for_service']:.4f}   # from {best['name']}")
+    # Printed rather than left to memory: the threshold above was measured under
+    # this colour mode and is only valid for a service applying the same one.
+    # Flagged as inert because it currently is — settings.colour_mode has no
+    # reader — and telling an operator to set a variable that does nothing, with
+    # no hint that it does nothing, is how a train/serve skew gets believed.
+    print(f"  COLOUR_MODE={cfg.colour.mode}", end="")
+    print("   # not read by the service yet; see documentation/02")
 
 
 def stage_export(cfg: Config, args) -> None:

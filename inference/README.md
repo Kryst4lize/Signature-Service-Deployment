@@ -67,11 +67,14 @@ inference/
 │       ├── config.py           env-driven settings
 │       ├── db.py               engine, session, the `items` table
 │       ├── images.py           PDF/image decode, tensor <-> PIL, base64
+│       ├── colour.py           paper white-balance (mirror of the training copy)
 │       ├── triton.py           Triton client + per-model tensor conventions
 │       └── routes.py           the four endpoints
+│   ├── alembic.ini
+│   └── migrations/             the schema, applied by the `migrate` service
 ├── nginx/nginx.conf            serves the SPA, proxies /api/
 ├── frontend/index.html         single-file UI
-├── postgres/init.sql           schema
+├── postgres/init.sql           bootstrap only (CREATE EXTENSION)
 ├── triton/model_repository/    config.pbtxt per model (weights not committed)
 └── tests/
 ```

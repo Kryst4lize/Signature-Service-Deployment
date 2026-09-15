@@ -63,11 +63,14 @@ training/
 │   ├── config.py               YAML + --set overrides
 │   ├── paths.py                package-relative asset resolution
 │   ├── data/
-│   │   ├── cyclegan.py         dataset builders
+│   │   ├── cyclegan.py         dataset builders + the .colour_mode stamp
+│   │   ├── colour.py           paper white-balance (mirrored into inference/)
 │   │   └── noise/
 │   │       ├── document.py     form rules, cell borders, caption text
 │   │       └── stamps.py       DPI-aware seal compositing
-│   ├── models/backbones.py     VGG16 / ResNet50 + extractor truncation
+│   ├── models/
+│   │   ├── backbones.py        VGG16 / ResNet50 + extractor truncation
+│   │   └── preprocess.py       the one extractor-input path (colour, then caffe)
 │   ├── train/
 │   │   ├── verification.py     two-phase fine-tune
 │   │   └── cyclegan.py         wraps the upstream repo
@@ -184,9 +187,9 @@ sigtrain --set verification.batch_size=16 train-verification
 |---|---|---|
 | `setup` | Clones the CycleGAN repo; validates the data layout | `external/pytorch-CycleGAN-and-pix2pix/` |
 | `data-cyclegan` | Pads to a square, optionally white-balances the paper, synthesises form rules, captions and stamps | `data/processed/cyclegan/{train,test}{A,B}/` |
-| `data-verification` | Copies genuine-only person folders | `data/processed/verification/{train,test}/` |
+| `data-verification` | Copies genuine-only person folders, white-balancing the paper on the way in; stamps the dataset with the mode used | `data/processed/verification/{train,test}/` |
 | `train-cyclegan` | Runs upstream `train.py` with config-derived arguments | `artifacts/cyclegan/signature/latest_net_G_{A,B}.pth` |
-| `train-verification` | Two-phase fine-tune, then truncates at `fc1` | `artifacts/models/*_extractor.keras` |
+| `train-verification` | Checks the dataset's colour stamp, two-phase fine-tune, then truncates at `fc1` | `artifacts/models/*_extractor.keras` |
 | `evaluate` | Genuine/impostor pairs over held-out identities | `artifacts/evaluation/{*.png,metrics.json}` |
 | `export` | ONNX + `config.pbtxt`, staged into the service | `../inference/triton/model_repository/` |
 
@@ -217,20 +220,45 @@ so 15% is held out of `train/` instead (`verification.val_split`).
 
 The scans carry a measured red deficit in the paper — R 243.3 against G/B 251.5,
 i.e. **B−R = +8.18** — which reads as a cyan/blue cast, and the denoiser
-reproduces it (its own output measures +3.45). `cyclegan_data.colour_mode`
-controls what the dataset builder does about it:
+reproduces it (its own output measures +3.45). So the backbones were trained at
++8.18 and served +3.45: two colour distributions, neither normalised, and the
+embedding had to absorb a difference that says nothing about whose signature it
+is.
+
+One setting fixes that at every point an image enters a model:
 
 ```yaml
-cyclegan_data:
-  colour_mode: none        # none | whiten | desaturate
+colour:
+  mode: none        # none | whiten | desaturate
 ```
 
+| stage | what it corrects |
+|---|---|
+| `data-cyclegan` | the clean image before noise, so both domains share a paper colour |
+| `data-verification` | the images written to disk, which is what the backbones read |
+
+Both are dataset *writers*. `train-verification` and `evaluate` read pixels that
+already carry the correction, and each checks the dataset's recorded mode before
+using it.
+
 `whiten` takes the dataset cast to −0.10 and slightly improves ink/paper
-contrast. It **must be matched by `COLOUR_MODE` in `inference/.env`**, and it
-only takes effect after a retrain — the current weights already carry the cast.
+contrast. It is applied at build time rather than in the Keras hook because that
+hook runs *after* augmentation and would see the 10.8% of the frame `cval=255`
+fills, leaving +0.83 of the cast instead of +0.00. Applying it in both places is
+**not** free: `whiten` is idempotent only while its gain clamp does not bind, and
+two passes raise the effective limit to `max_gain²`.
+
+Changing the mode **invalidates the built datasets and the trained extractors**.
+Delete `data/processed/verification/` — the builder refuses to mix modes — then
+re-run `data-verification`, `train-verification`, `evaluate`, `export`.
+
+`sigtrain evaluate` prints `COLOUR_MODE=` alongside `MATCH_THRESHOLD=`. Note
+that **the service does not read `COLOUR_MODE` yet**: `settings.colour_mode` is
+declared and unused, so any mode but `none` is currently a train/serve skew until
+the serving side is wired.
 
 Full measurements and the two implementation traps are in
-[documentation/02-pipeline-deep-dive.md](../documentation/02-pipeline-deep-dive.md#the-paper-colour-cast).
+[documentation/02-pipeline-deep-dive.md](../documentation/02-pipeline-deep-dive.md#the-colour-contract).
 
 ### Two-phase fine-tuning
 
@@ -295,7 +323,10 @@ uv run pytest      # on the host, against the locked environment
 ```
 
 The suite covers dataset construction, augmentation determinism, config
-resolution, metrics, pair building, config.pbtxt generation and the CLI.
+resolution, metrics, pair building, config.pbtxt generation, the CLI, and the
+colour contract. The colour tests that need TensorFlow are marked and skip
+cleanly without it, so the TensorFlow-free `make test` image still runs the
+rest.
 
 ---
 
@@ -323,7 +354,8 @@ halves. `uv.lock` is committed and authoritative: the images build with
 
 ## Preprocessing contract
 
-The extractors are trained with Keras `preprocess_input(mode="caffe")` applied
+The extractors are trained with `models/preprocess.py:extractor_preprocess` —
+the paper white-balance, then Keras `preprocess_input(mode="caffe")` — applied
 **outside** the model by `ImageDataGenerator`. The exported ONNX therefore
 begins at Conv1 on an already-preprocessed tensor — BGR, ImageNet mean
 subtracted, `[0, 255]` scale — and **the serving side must reproduce it**.

@@ -4,9 +4,18 @@ Both are trained as N-way person classifiers and then truncated at `fc1`, which
 is the 4096-d embedding the inference service stores and compares.
 Following https://arxiv.org/abs/2004.12104.
 
-`fc1` for both is not a coincidence to preserve: `inference/postgres/init.sql`
-declares VECTOR(4096) and each `config.pbtxt` declares `dims: [4096]`. Changing
-`verification.embedding_dim` means changing all three.
+`fc1` for both is not a coincidence to preserve. The width is declared in three
+other places, and changing `verification.embedding_dim` means changing all of
+them:
+
+    inference/api/app/db.py                      Vector(4096) columns
+    inference/api/migrations/versions/0001_*.py  the migration that creates them
+    inference/triton/model_repository/*/config.pbtxt   dims: [4096]
+
+Not `inference/postgres/init.sql` — that was reduced to a bare
+`CREATE EXTENSION`, because the entrypoint only runs it when PGDATA is empty and
+an edited init script silently stops applying the moment a volume exists. The
+schema is owned by Alembic.
 """
 
 from __future__ import annotations

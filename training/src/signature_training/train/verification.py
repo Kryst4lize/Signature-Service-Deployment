@@ -21,8 +21,6 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import optimizers
-from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
-from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_preprocess
 from tensorflow.keras.callbacks import (
     EarlyStopping,
     ModelCheckpoint,
@@ -32,16 +30,16 @@ from tensorflow.keras.callbacks import (
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from ..config import Config
+from ..data.cyclegan import require_colour_stamp
 from ..models.backbones import (
     build_resnet50,
     build_vgg16,
     make_extractor,
     set_finetune_trainable,
 )
+from ..models.preprocess import embed_image, extractor_preprocess
 
 logger = logging.getLogger(__name__)
-
-PREPROCESS = {"vgg16": vgg_preprocess, "resnet50": resnet_preprocess}
 
 # Caffe preprocessing subtracts the ImageNet BGR mean from a [0, 255] image, so
 # white paper (255) maps to about +131/+138/+151. Filling augmentation borders
@@ -58,11 +56,20 @@ def _generators(cfg: Config, backbone: str):
     if not train_dir.is_dir():
         raise FileNotFoundError(f"{train_dir} not found. Run `sigtrain data-verification` first.")
 
+    # The images under train_dir already carry cfg.colour.mode, applied when the
+    # dataset was written. Confirm that before training on them: nothing else
+    # compares the two, so a mismatch would train on one colour distribution
+    # while recording another in config.used.yaml.
+    require_colour_stamp(cfg.paths.resolve("verification_dataset"), cfg.colour.mode)
+
     filtered = _genuine_only(train_dir)
     v = cfg.verification
 
     aug = ImageDataGenerator(
-        preprocessing_function=PREPROCESS[backbone],
+        # No colour mode here on purpose. The correction is already in the
+        # pixels, and this hook runs after augmentation — applying it again
+        # would compose two clamped gains. See models/preprocess.py.
+        preprocessing_function=extractor_preprocess(backbone),
         rotation_range=8,
         width_shift_range=0.10,
         height_shift_range=0.10,
@@ -194,13 +201,23 @@ def run(cfg: Config) -> dict[str, str]:
     return produced
 
 
-def embed(extractor: tf.keras.Model, image_path: str, backbone: str, size: int = 224) -> np.ndarray:
-    """One image -> L2-normalised embedding, using the same preprocessing the
-    model was trained with. The inference service must match this exactly;
-    see inference/api/app/triton.py:to_caffe."""
-    img = tf.keras.preprocessing.image.load_img(image_path, target_size=(size, size))
-    arr = tf.keras.preprocessing.image.img_to_array(img)
-    arr = PREPROCESS[backbone](np.expand_dims(arr, 0))
-    vec = extractor.predict(arr, verbose=0).flatten()
-    norm = float(np.linalg.norm(vec))
-    return vec / norm if norm > 0 else vec
+def embed(
+    extractor: tf.keras.Model,
+    image_path: str,
+    backbone: str,
+    colour_mode: str,
+    size: int = 224,
+) -> np.ndarray:
+    """One RAW image -> L2-normalised embedding.
+
+    `colour_mode` is required rather than defaulted. A default would be wrong
+    half the time and undetectably so: nothing in a saved `.keras` file records
+    the colour mode it was trained under, and an embedding computed with the
+    wrong one comes out plausible (measured cosine 0.9996 against the right
+    answer) rather than obviously broken.
+
+    Images already read from `paths.verification_dataset` carry the correction;
+    pass "none" for those. The inference service must match this exactly; see
+    inference/api/app/triton.py:to_caffe.
+    """
+    return embed_image(extractor, image_path, backbone, colour_mode, size)

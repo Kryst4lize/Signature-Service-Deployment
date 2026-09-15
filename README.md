@@ -122,15 +122,15 @@ Neither is vendored:
 │   ├── assets/                   caption font
 │   ├── data/                     datasets (gitignored)
 │   ├── artifacts/                checkpoints, models, ONNX, plots (gitignored)
-│   └── tests/                    62 tests, no GPU required
+│   └── tests/                    97 tests, no GPU required
 │
 ├── inference/
-│   ├── api/app/                  main, config, db, images, triton, routes
+│   ├── api/app/                  main, config, db, images, colour, triton, routes
 │   ├── triton/model_repository/  config.pbtxt per model
-│   ├── postgres/init.sql         schema
+│   ├── postgres/init.sql         bootstrap only; schema lives in api/migrations/
 │   ├── frontend/index.html       web UI
 │   ├── nginx/nginx.conf          SPA + /api proxy
-│   └── tests/                    33 tests against a real pgvector
+│   └── tests/                    56 tests; 21 need a real pgvector
 │
 └── documentation/
 ```
