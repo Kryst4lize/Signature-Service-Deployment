@@ -29,6 +29,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from ..config import Config
+from . import colour
 from .noise.document import DocumentNoise, seeded_rngs
 from .noise.stamps import StampAugmentor
 
@@ -105,7 +106,9 @@ def build(cfg: Config) -> dict[str, int]:
     for split, items in splits.items():
         for path in tqdm(items, desc=f"  {split}", unit="img"):
             try:
-                clean, noisy = _make_pair(path, document, stamper, data_cfg.image_size)
+                clean, noisy = _make_pair(
+                    path, document, stamper, data_cfg.image_size, data_cfg.colour_mode
+                )
             except Exception as exc:
                 failures.append((path, str(exc)))
                 continue
@@ -143,10 +146,19 @@ def _make_pair(
     document: DocumentNoise,
     stamper: StampAugmentor,
     size: int,
+    colour_mode: str = "none",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """(clean, noisy) as BGR uint8 arrays of shape (size, size, 3)."""
+    """(clean, noisy) as BGR uint8 arrays of shape (size, size, 3).
+
+    Colour correction is applied to the CLEAN image before noise is added, so
+    domain A is what the generator learns to produce and domain B inherits the
+    same paper colour. Correcting only one domain would teach the generator to
+    change colour as part of denoising.
+    """
     square = make_square(Image.open(path), size)
     clean = cv2.cvtColor(np.array(square), cv2.COLOR_RGB2BGR)
+    if colour_mode != "none":
+        clean = colour.apply(clean, colour_mode).astype(np.uint8)
     noisy = stamper(document(clean.copy()))
     return clean, noisy
 

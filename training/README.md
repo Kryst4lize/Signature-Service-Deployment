@@ -183,7 +183,7 @@ sigtrain --set verification.batch_size=16 train-verification
 | Stage | Does | Produces |
 |---|---|---|
 | `setup` | Clones the CycleGAN repo; validates the data layout | `external/pytorch-CycleGAN-and-pix2pix/` |
-| `data-cyclegan` | Pads signatures to a square, synthesises form rules, captions and stamps | `data/processed/cyclegan/{train,test}{A,B}/` |
+| `data-cyclegan` | Pads to a square, optionally white-balances the paper, synthesises form rules, captions and stamps | `data/processed/cyclegan/{train,test}{A,B}/` |
 | `data-verification` | Copies genuine-only person folders | `data/processed/verification/{train,test}/` |
 | `train-cyclegan` | Runs upstream `train.py` with config-derived arguments | `artifacts/cyclegan/signature/latest_net_G_{A,B}.pth` |
 | `train-verification` | Two-phase fine-tune, then truncates at `fc1` | `artifacts/models/*_extractor.keras` |
@@ -212,6 +212,25 @@ ValueError: target.shape=(None, 21)  output.shape=(None, 64)
 ```
 
 so 15% is held out of `train/` instead (`verification.val_split`).
+
+### Paper colour
+
+The scans carry a measured red deficit in the paper — R 243.3 against G/B 251.5,
+i.e. **B−R = +8.18** — which reads as a cyan/blue cast, and the denoiser
+reproduces it (its own output measures +3.45). `cyclegan_data.colour_mode`
+controls what the dataset builder does about it:
+
+```yaml
+cyclegan_data:
+  colour_mode: none        # none | whiten | desaturate
+```
+
+`whiten` takes the dataset cast to −0.10 and slightly improves ink/paper
+contrast. It **must be matched by `COLOUR_MODE` in `inference/.env`**, and it
+only takes effect after a retrain — the current weights already carry the cast.
+
+Full measurements and the two implementation traps are in
+[documentation/02-pipeline-deep-dive.md](../documentation/02-pipeline-deep-dive.md#the-paper-colour-cast).
 
 ### Two-phase fine-tuning
 
