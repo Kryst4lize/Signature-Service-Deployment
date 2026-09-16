@@ -167,6 +167,18 @@ jobs:
       - name: tests/Dockerfile pins agree with uv.lock
         run: uv run --no-project --python 3.11 python training/scripts/check_test_pins.py
 
+      # colour.py exists twice on purpose — the two halves are independent
+      # packages with no shared import, the same arrangement as the Caffe
+      # preprocessing. The unit test that compares them can only run where both
+      # trees are present, and neither test container mounts both, so the
+      # comparison lives here. Docstrings differ (each names the other side);
+      # everything from the first import down must be identical.
+      - name: colour.py mirror has not drifted
+        run: |
+          diff <(sed -n '/^from __future__/,$p' training/src/signature_training/data/colour.py) \
+               <(sed -n '/^from __future__/,$p' inference/api/app/colour.py) \
+            && echo "colour.py: training and inference copies agree"
+
   # ══ test ════════════════════════════════════════════════════════════════════
   # Both jobs shell out to the repo's own make targets rather than
   # reimplementing the setup in YAML. That is deliberate: `make test` and

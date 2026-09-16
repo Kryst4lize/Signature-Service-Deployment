@@ -54,6 +54,88 @@ in `training/src/signature_training/train/verification.py`; serving-side is
 
 ---
 
+## The paper colour cast
+
+The denoised output looks blue. It is measured, and it is not blue being added —
+it is **red being removed**.
+
+Kaggle training set, 400 genuine images, paper = luminance > 200:
+
+| region | R | G | B | B − R |
+|---|---|---|---|---|
+| paper | **243.28** | 251.47 | 251.46 | **+8.18** |
+| ink | 102.15 | 89.88 | 95.67 | −6.49 |
+
+Green and blue agree to 0.01. Red is ~8 levels short, and a red deficit reads as
+cyan. It is near-constant across the corpus — per-image B−R has sd **0.15**
+(range +7.83..+8.94) — so it is one scanner and one fixed offset, not per-image
+variation. (None of the sampled files are achromatic, so the old claim that this
+dataset is greyscale is also wrong.)
+
+CycleGAN reproduces the colour distribution it is trained on, so the generator
+inherits it. Running the real `latest_net_G_B.pth` on synthesised noisy inputs:
+
+| | R | G | B | B − R |
+|---|---|---|---|---|
+| noisy input paper | 249.63 | 250.79 | 250.80 | +1.17 |
+| **denoised paper** | **249.98** | 253.43 | 253.43 | **+3.45** |
+
+The generator *adds* cast: it takes a near-neutral input and returns a
+red-deficient one, because that is what its domain A looked like.
+
+### The correction
+
+`training/src/signature_training/data/colour.py` (mirrored into
+`inference/api/app/colour.py`) estimates the per-channel paper level and applies
+a diagonal gain.
+
+Two things about it are load-bearing, and both were found by measuring rather
+than reasoning:
+
+* **The paper estimate is a MEAN over the paper band**, not a high percentile
+  and not a median of the brightest pixels. Denoiser output has paper spread
+  from ~249 up to a saturated spike at 255; a percentile or a top-quantile
+  median lands on the spike, reports ~255 for every channel, and the correction
+  becomes a silent no-op. First two implementations did exactly that
+  (+3.46 → +3.45, i.e. nothing).
+* **Channels are equalised against the brightest one, not driven to 255.**
+  Targeting white looks equivalent and is not: paper often already sits within a
+  couple of levels of saturation, so the extra gain is swallowed by the clip and
+  the cast survives.
+
+Measured after those two fixes:
+
+| case | before | after `whiten` | after `desaturate` |
+|---|---|---|---|
+| raw dataset paper | +8.18 | **−0.10** | 0.00 |
+| real G_B output paper | +3.45 | **+1.75** | 0.00 |
+
+Ink/paper contrast goes *up* slightly (153.2 → 155.8), so strokes are not eroded.
+
+### What to actually do
+
+The root fix is upstream: set `cyclegan_data.colour_mode: whiten`, rebuild the
+CycleGAN dataset and retrain. Domain A then has neutral paper and the generator
+stops emitting a cast at all — which is why the residual on the current model
+(+1.75) cannot be driven to zero from the outside: post-hoc correction is
+undoing something the weights already baked in, against a saturating ceiling.
+
+Until then, `PREVIEW_WHITEN=true` (the default) neutralises the previews the UI
+shows without touching the tensor that produces an embedding. That fixes the
+visible symptom at zero model risk.
+
+`COLOUR_MODE` applies the correction in the embedding path and **must match
+`cyclegan_data.colour_mode`**. Turning it on alone reintroduces exactly the
+train/serve skew this pipeline has already been bitten by once.
+
+`desaturate` is the stronger option: a signature's identity is stroke geometry,
+not colour, so discarding chroma removes this cast and every other
+scanner-dependent colour difference at once. It is a bigger change — the
+backbones are ImageNet-pretrained and do use colour — so it is offered rather
+than assumed.
+
+---
+
 ## Why a classifier for a verification task
 
 Following [arXiv:2004.12104](https://arxiv.org/abs/2004.12104).
